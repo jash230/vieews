@@ -1,6 +1,6 @@
--- Vieews schema. Server code uses the service-role key and filters by user_id itself;
--- RLS policies below cover the browser (Clerk session token via Supabase third-party auth),
--- which only touches Storage for direct uploads.
+-- Vieews schema. Only the server talks to Supabase (with the secret key) and it filters
+-- by user_id itself. RLS is on with no policies, so the public API keys can read nothing.
+-- The browser uploads media through one-time signed upload URLs the server creates.
 
 create type public.platform as enum ('youtube', 'instagram', 'tiktok');
 
@@ -105,29 +105,15 @@ create trigger posts_updated before update on public.posts
 create trigger post_targets_updated before update on public.post_targets
   for each row execute function public.set_updated_at();
 
--- RLS on everything. social_accounts and api_keys get no policies at all, so only the
--- service role can read them (they hold encrypted tokens and key hashes).
+-- RLS on everything, no policies: only the secret (service-role) key can read or write.
 alter table public.social_accounts enable row level security;
 alter table public.api_keys enable row level security;
 alter table public.media_assets enable row level security;
 alter table public.posts enable row level security;
 alter table public.post_targets enable row level security;
 
-create policy "own media" on public.media_assets for select to authenticated
-  using (user_id = (select auth.jwt() ->> 'sub'));
-create policy "own posts" on public.posts for select to authenticated
-  using (user_id = (select auth.jwt() ->> 'sub'));
-create policy "own targets" on public.post_targets for select to authenticated
-  using (user_id = (select auth.jwt() ->> 'sub'));
-
--- Private media bucket; objects live under "<clerk user id>/...".
+-- Private media bucket; objects live under "<clerk user id>/...". No storage policies:
+-- uploads go through signed upload URLs and reads through signed URLs.
 insert into storage.buckets (id, name, public)
 values ('media', 'media', false)
 on conflict (id) do nothing;
-
-create policy "media upload own folder" on storage.objects for insert to authenticated
-  with check (bucket_id = 'media' and (storage.foldername(name))[1] = (select auth.jwt() ->> 'sub'));
-create policy "media read own folder" on storage.objects for select to authenticated
-  using (bucket_id = 'media' and (storage.foldername(name))[1] = (select auth.jwt() ->> 'sub'));
-create policy "media update own folder" on storage.objects for update to authenticated
-  using (bucket_id = 'media' and (storage.foldername(name))[1] = (select auth.jwt() ->> 'sub'));

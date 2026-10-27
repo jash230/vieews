@@ -17,16 +17,16 @@ Throughout, `APP_URL` means your app's public URL: `http://localhost:3000` local
 
 1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com). Pick the sign-in methods you want (email + Google is fine).
 2. **Configure → Restrictions → Sign-up mode → Restricted.** Do this once you've created your own account, so nobody else can sign up.
-3. Copy the publishable and secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
-4. **Integrations → Supabase → Activate.** Copy the Clerk domain it shows; you need it in the next step.
+3. Copy the publishable and secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Paste only the value after the `=`.
 
 ## 2. Supabase (database + file storage)
 
+Supabase doesn't need to know about Clerk: only the server talks to it, and the browser uploads through one-time links the server creates.
+
 1. Create a project at [supabase.com](https://supabase.com/dashboard).
-2. **Authentication → Sign In / Providers → Third-party auth → Add provider → Clerk**, and paste the Clerk domain. This lets the browser upload straight to Storage using your Clerk session.
-3. **SQL Editor → New query**: paste all of `supabase/migrations/0001_init.sql` and run it. (Or with the Supabase CLI: `supabase link` then `supabase db push`.)
-4. **Project Settings → API Keys**: copy the project URL, the publishable key and a secret key into `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`.
-5. **Storage → Settings → Upload file size limit.** Free plan max is 50 MB per file. On Pro you can raise it (Instagram allows 300 MB, TikTok 4 GB).
+2. **SQL Editor → New query**: paste all of `supabase/migrations/0001_init.sql` and run it. (Or with the Supabase CLI: `supabase link` then `supabase db push`.)
+3. **Project Settings → API Keys**: copy the project URL and a secret key into `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY`. (Older projects: use the `service_role` key.) Keep the secret key out of code and chat.
+4. **Storage → Settings → Upload file size limit.** Free plan max is 50 MB per file. On Pro you can raise it (Instagram allows 300 MB, TikTok 4 GB).
 
 ## 3. Inngest (publishing jobs and scheduling)
 

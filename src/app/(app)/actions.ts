@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { disconnectAccount, getAccount, getValidAccessToken } from "@/lib/accounts/service";
-import { createMediaAsset, finalizeMediaAsset, type NewMediaInput } from "@/lib/media/service";
+import { createMediaAsset, createSignedUpload, createSignedUploadUrl, finalizeMediaAsset, thumbnailPathFor, type NewMediaInput } from "@/lib/media/service";
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import type { CreatePostInput } from "@/lib/posts/schema";
@@ -25,7 +25,9 @@ async function run<T>(fn: (userId: string) => Promise<T>): Promise<ActionResult<
 export async function startUploadAction(input: NewMediaInput) {
   return run(async (userId) => {
     const asset = await createMediaAsset(userId, input);
-    return { assetId: asset.id, storagePath: asset.storage_path };
+    const thumbnailPath = thumbnailPathFor(asset);
+    const [uploadUrl, thumbnailUploadUrl] = await Promise.all([createSignedUpload(asset), createSignedUploadUrl(thumbnailPath)]);
+    return { assetId: asset.id, uploadUrl, thumbnailPath, thumbnailUploadUrl };
   });
 }
 

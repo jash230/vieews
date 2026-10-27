@@ -1,9 +1,6 @@
 "use client";
 
-import { useSession } from "@clerk/nextjs";
-import { createClient } from "@supabase/supabase-js";
 import { useCallback, useRef, useState } from "react";
-import * as tus from "tus-js-client";
 import { finishUploadAction, startUploadAction } from "../actions";
 
 export interface MediaMeta {
@@ -12,11 +9,6 @@ export interface MediaMeta {
   durationS: number | null;
   thumbnail: Blob | null;
 }
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
-/** Supabase's resumable endpoint requires exactly 6 MB chunks. */
-const CHUNK = 6 * 1024 * 1024;
 
 function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
@@ -66,70 +58,70 @@ export type UploadState =
   | { status: "done"; assetId: string }
   | { status: "error"; error: string };
 
+/** PUTs a file to a Supabase signed upload URL, reporting progress. */
+function putToSignedUrl(url: string, body: Blob, onProgress: (fraction: number) => void, register: (xhr: XMLHttpRequest) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    register(xhr);
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", body.type || "application/octet-stream");
+    xhr.setRequestHeader("x-upsert", "true");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `Upload failed (${xhr.status})`;
+      try {
+        message = JSON.parse(xhr.responseText).message ?? message;
+      } catch {
+        // Not JSON.
+      }
+      reject(new Error(xhr.status === 413 || /maximum allowed size|too large/i.test(message) ? "This file is bigger than your Supabase storage upload limit." : message));
+    };
+    xhr.onerror = () => reject(new Error("Upload failed. Check your connection and retry."));
+    xhr.onabort = () => reject(new DOMException("Upload canceled", "AbortError"));
+    xhr.send(body);
+  });
+}
+
 export function useMediaUpload() {
-  const { session } = useSession();
   const [state, setState] = useState<UploadState>({ status: "idle" });
-  const current = useRef<tus.Upload | null>(null);
+  const current = useRef<XMLHttpRequest | null>(null);
 
   const cancel = useCallback(() => {
-    current.current?.abort(true);
+    current.current?.abort();
     current.current = null;
     setState({ status: "idle" });
   }, []);
 
-  const upload = useCallback(
-    async (file: File, meta: MediaMeta) => {
-      current.current?.abort(true);
-      if (!session) return setState({ status: "error", error: "You're signed out. Refresh and sign in again." });
-      setState({ status: "uploading", progress: 0 });
+  const upload = useCallback(async (file: File, meta: MediaMeta) => {
+    current.current?.abort();
+    setState({ status: "uploading", progress: 0 });
 
-      const started = await startUploadAction({ mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS });
-      if (!started.ok) return setState({ status: "error", error: started.error });
-      const { assetId, storagePath } = started.data;
-      const token = () => session.getToken();
+    // The server creates the asset and hands back one-time upload links.
+    const started = await startUploadAction({ mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS });
+    if (!started.ok) return setState({ status: "error", error: started.error });
+    const { assetId, uploadUrl, thumbnailPath, thumbnailUploadUrl } = started.data;
+    const register = (xhr: XMLHttpRequest) => (current.current = xhr);
 
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const up = new tus.Upload(file, {
-            endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
-            retryDelays: [0, 2000, 5000, 10000, 20000],
-            chunkSize: CHUNK,
-            uploadDataDuringCreation: true,
-            removeFingerprintOnSuccess: true,
-            headers: { apikey: SUPABASE_KEY, "x-upsert": "true" },
-            metadata: { bucketName: "media", objectName: storagePath, contentType: file.type, cacheControl: "3600" },
-            // Clerk tokens are short-lived, so attach a fresh one to every chunk.
-            onBeforeRequest: async (req) => {
-              req.setHeader("authorization", `Bearer ${await token()}`);
-            },
-            onProgress: (sent, total) => setState({ status: "uploading", progress: total ? sent / total : 0 }),
-            onError: reject,
-            onSuccess: () => resolve(),
-          });
-          current.current = up;
-          up.start();
-        });
+    try {
+      await putToSignedUrl(uploadUrl, file, (progress) => setState({ status: "uploading", progress }), register);
 
-        let thumbPath: string | null = null;
-        if (meta.thumbnail) {
-          const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { accessToken: async () => (await token()) ?? null });
-          const path = storagePath.replace(/\.[^.]+$/, ".thumb.jpg");
-          const { error } = await supabase.storage.from("media").upload(path, meta.thumbnail, { contentType: "image/jpeg", upsert: true });
-          if (!error) thumbPath = path;
-        }
-
-        const done = await finishUploadAction(assetId, thumbPath);
-        if (!done.ok) throw new Error(done.error);
-        setState({ status: "done", assetId });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Upload failed";
-        setState({ status: "error", error: /413|Payload too large|maximum allowed size/i.test(message) ? "This file is bigger than your Supabase storage upload limit." : message });
-      } finally {
-        current.current = null;
+      let thumbPath: string | null = null;
+      if (meta.thumbnail) {
+        // Thumbnail is optional; a failure here shouldn't block the post.
+        thumbPath = await putToSignedUrl(thumbnailUploadUrl, meta.thumbnail, () => {}, register).then(() => thumbnailPath, () => null);
       }
-    },
-    [session],
-  );
+
+      const done = await finishUploadAction(assetId, thumbPath);
+      if (!done.ok) throw new Error(done.error);
+      setState({ status: "done", assetId });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setState({ status: "error", error: err instanceof Error ? err.message : "Upload failed" });
+    } finally {
+      current.current = null;
+    }
+  }, []);
 
   return { state, upload, cancel };
 }

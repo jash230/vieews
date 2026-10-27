@@ -67,7 +67,7 @@ export async function finalizeMediaAsset(
   const db = supabaseAdmin();
   const { data: info, error: infoError } = await db.storage.from(MEDIA_BUCKET).info(asset.storage_path);
   if (infoError || !info) throw new Error("Upload not found in storage yet. Finish uploading the file first.");
-  if (patch.thumbnailPath && !patch.thumbnailPath.startsWith(`${userId}/`)) throw new Error("Invalid thumbnail path");
+  if (patch.thumbnailPath && patch.thumbnailPath !== thumbnailPathFor(asset)) throw new Error("Invalid thumbnail path");
   const { data, error } = await db
     .from("media_assets")
     .update({
@@ -85,11 +85,19 @@ export async function finalizeMediaAsset(
   return data as MediaAssetRow;
 }
 
-/** Signed URL an agent can PUT the file to (used by the MCP server). */
-export async function createSignedUpload(asset: MediaAssetRow) {
-  const { data, error } = await supabaseAdmin().storage.from(MEDIA_BUCKET).createSignedUploadUrl(asset.storage_path, { upsert: true });
+/** One-time URL the browser or an agent can PUT the raw file to (valid for 2 hours). */
+export async function createSignedUploadUrl(path: string): Promise<string> {
+  const { data, error } = await supabaseAdmin().storage.from(MEDIA_BUCKET).createSignedUploadUrl(path, { upsert: true });
   if (error || !data) throw error ?? new Error("Couldn't create upload URL");
   return data.signedUrl;
+}
+
+export function createSignedUpload(asset: MediaAssetRow) {
+  return createSignedUploadUrl(asset.storage_path);
+}
+
+export function thumbnailPathFor(asset: MediaAssetRow) {
+  return asset.storage_path.replace(/\.[^.]+$/, ".thumb.jpg");
 }
 
 export async function signedReadUrl(path: string, expiresInS = 60 * 60): Promise<string> {

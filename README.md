@@ -8,7 +8,7 @@ Start with [SETUP.md](SETUP.md): it walks through every account and key you need
 
 ## How it works
 
-- **Upload**: the browser sends the file straight to a private Supabase Storage bucket over resumable TUS uploads, so large videos never pass through a Vercel function.
+- **Upload**: the server hands the browser a one-time signed upload URL and the file goes straight to a private Supabase Storage bucket, so large videos never pass through a Vercel function.
 - **Publish**: creating a post sends an Inngest event. `publish-post` waits until the scheduled time, then fans out one `publish-target` job per account. Each job streams the file to the platform in chunks (YouTube resumable upload, TikTok chunked FILE_UPLOAD) or hands Instagram a short-lived signed URL, polls processing, and records the live link. Every step is retried and resumable.
 - **Accounts**: OAuth tokens are encrypted with AES-256-GCM before they're stored and refreshed automatically. Failed refreshes flag the account for reconnecting.
 - **MCP**: `/api/mcp` exposes `list_accounts`, `get_platform_requirements`, `create_media_upload`, `finalize_media_upload`, `import_media_from_url`, `create_post`, `get_post`, `list_posts`, `cancel_post` and `retry_post_target`, authenticated with API keys you create in the app.
