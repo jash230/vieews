@@ -24,3 +24,13 @@ export const env = {
     clientSecret: required("TIKTOK_CLIENT_SECRET"),
   }),
 };
+
+/** Env vars each platform needs before its OAuth flow can start, and where SETUP.md covers them. */
+export const PLATFORM_ENV = {
+  youtube: { vars: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], setupStep: 4 },
+  instagram: { vars: ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"], setupStep: 5 },
+  tiktok: { vars: ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"], setupStep: 6 },
+} as const;
+
+export const isPlatformConfigured = (platform: keyof typeof PLATFORM_ENV) =>
+  PLATFORM_ENV[platform].vars.every((name) => !!process.env[name]);

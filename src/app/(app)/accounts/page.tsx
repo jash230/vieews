@@ -1,9 +1,11 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
-import { ButtonLink } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Notice, PageHeader } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
+import { isPlatformConfigured, PLATFORM_ENV } from "@/lib/env";
+import { cn } from "@/lib/utils";
 import { PLATFORMS, type Platform } from "@/lib/types";
 import { auth } from "@clerk/nextjs/server";
 import { DisconnectButton } from "./disconnect-button";
@@ -76,9 +78,20 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
                   </ul>
                 )}
                 <div className="mt-auto pt-2">
-                  <ButtonLink href={`/api/connect/${platform}`} prefetch={false} variant={list.length ? "secondary" : "primary"} className="w-full">
-                    {list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another` : `Connect ${meta.label}`}
-                  </ButtonLink>
+                  {isPlatformConfigured(platform) ? (
+                    // A plain <a>, not <Link>: the route redirects to the platform's sign-in page, which needs a full page load.
+                    <a href={`/api/connect/${platform}`} className={cn(buttonVariants({ variant: list.length ? "secondary" : "primary" }), "w-full")}>
+                      {list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another` : `Connect ${meta.label}`}
+                    </a>
+                  ) : (
+                    <>
+                      <Button variant="secondary" disabled className="w-full">Not set up</Button>
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                        Add {PLATFORM_ENV[platform].vars.map((v) => <code key={v} className="font-mono">{v} </code>)}
+                        to <code className="font-mono">.env.local</code> and restart. See SETUP.md step {PLATFORM_ENV[platform].setupStep}.
+                      </p>
+                    </>
+                  )}
                 </div>
               </CardBody>
             </Card>
