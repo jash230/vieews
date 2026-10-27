@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vieews
 
-## Getting Started
+Upload a video or photo once and publish it, now or on a schedule, to your YouTube, Instagram and TikTok accounts. Includes an MCP server so an AI agent (Claude Code, Claude Desktop, Cursor…) can upload and post for you.
 
-First, run the development server:
+**Stack:** Next.js 16 (App Router) · React 19 · Tailwind 4 · Clerk · Supabase (Postgres + Storage) · Inngest · Vercel
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+Start with [SETUP.md](SETUP.md): it walks through every account and key you need.
+
+## How it works
+
+- **Upload**: the browser sends the file straight to a private Supabase Storage bucket over resumable TUS uploads, so large videos never pass through a Vercel function.
+- **Publish**: creating a post sends an Inngest event. `publish-post` waits until the scheduled time, then fans out one `publish-target` job per account. Each job streams the file to the platform in chunks (YouTube resumable upload, TikTok chunked FILE_UPLOAD) or hands Instagram a short-lived signed URL, polls processing, and records the live link. Every step is retried and resumable.
+- **Accounts**: OAuth tokens are encrypted with AES-256-GCM before they're stored and refreshed automatically. Failed refreshes flag the account for reconnecting.
+- **MCP**: `/api/mcp` exposes `list_accounts`, `get_platform_requirements`, `create_media_upload`, `finalize_media_upload`, `import_media_from_url`, `create_post`, `get_post`, `list_posts`, `cancel_post` and `retry_post_target`, authenticated with API keys you create in the app.
+
+## Layout
+
+```
+src/app/(app)/            dashboard, compose, posts, accounts, settings (+ server actions)
+src/app/api/connect/      OAuth start + callback per platform
+src/app/api/inngest/      background job endpoint
+src/app/api/mcp/          MCP server
+src/lib/platforms/        one adapter per platform + shared limits/validation
+src/lib/posts|media|accounts/  services shared by the UI and MCP tools
+src/lib/inngest/          publish jobs
+supabase/migrations/      schema, RLS, storage bucket
+design-system/MASTER.md   UI tokens and rules
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev         # app on :3000
+npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+npm test            # unit tests (adapters, validation, crypto)
+npm run typecheck
+npm run lint
+npm run build
+```
