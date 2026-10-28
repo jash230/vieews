@@ -33,11 +33,11 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
       {error && <Notice tone="error" className="mb-6">{error}</Notice>}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {PLATFORMS.map((platform) => {
+        {PLATFORMS.map((platform, i) => {
           const list = accounts.filter((a) => a.platform === platform);
           const meta = PLATFORM_META[platform];
           return (
-            <Card key={platform} className="flex flex-col">
+            <Card key={platform} className="flex animate-fade-up flex-col" style={{ animationDelay: `${i * 80}ms` }}>
               <CardHeader className="flex-nowrap">
                 <div className="flex items-center gap-3">
                   <PlatformBadge platform={platform} />

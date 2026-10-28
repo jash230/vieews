@@ -24,9 +24,9 @@ export default async function DashboardPage() {
   const published = recent.filter((p) => p.status === "published" || p.status === "partial").length;
 
   const stats = [
-    { label: "Connected accounts", value: accounts.length, icon: Link2 },
-    { label: "Scheduled", value: upcoming.length, icon: CalendarClock },
-    { label: "Recently published", value: published, icon: Send },
+    { label: "Connected accounts", value: accounts.length, icon: Link2, tile: "bg-brand-tea/60" },
+    { label: "Scheduled", value: upcoming.length, icon: CalendarClock, tile: "bg-brand-olive/45" },
+    { label: "Recently published", value: published, icon: Send, tile: "bg-brand-teal/35" },
   ];
 
   return (
@@ -48,11 +48,13 @@ export default async function DashboardPage() {
       )}
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        {stats.map(({ label, value, icon: Icon }) => (
-          <Card key={label} className="flex items-center gap-4 p-5">
-            <span className="grid size-11 place-items-center rounded-xl bg-primary-soft text-primary"><Icon className="size-5" aria-hidden /></span>
+        {stats.map(({ label, value, icon: Icon, tile }, i) => (
+          <Card key={label} className="group flex animate-fade-up items-center gap-4 p-5" style={{ animationDelay: `${i * 80}ms` }}>
+            <span className={`grid size-12 place-items-center rounded-2xl text-primary ${tile}`}>
+              <Icon className="size-5 group-hover:animate-wiggle" aria-hidden />
+            </span>
             <div>
-              <p className="text-2xl font-bold tabular-nums">{value}</p>
+              <p className="animate-pop-in font-display text-3xl font-semibold tabular-nums" style={{ animationDelay: `${150 + i * 80}ms` }}>{value}</p>
               <p className="text-sm text-muted-foreground">{label}</p>
             </div>
           </Card>

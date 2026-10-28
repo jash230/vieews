@@ -3,8 +3,8 @@ import type { Platform } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const PLATFORM_META: Record<Platform, { label: string; path: string; tint: string; text: string }> = {
-  youtube: { label: "YouTube", path: siYoutube.path, tint: "bg-[#fff0f0]", text: "text-youtube" },
-  instagram: { label: "Instagram", path: siInstagram.path, tint: "bg-[#fff0f6]", text: "text-instagram" },
+  youtube: { label: "YouTube", path: siYoutube.path, tint: "bg-youtube-soft", text: "text-youtube" },
+  instagram: { label: "Instagram", path: siInstagram.path, tint: "bg-instagram-soft", text: "text-instagram" },
   tiktok: { label: "TikTok", path: siTiktok.path, tint: "bg-muted", text: "text-tiktok" },
 };
 

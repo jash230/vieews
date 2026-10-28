@@ -18,8 +18,8 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
     : formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   return (
     <li>
-      <Link href={`/posts/${post.id}`} className="flex items-center gap-4 px-5 py-3.5 transition-colors duration-150 hover:bg-surface">
-        <div className="relative aspect-[9/16] w-11 shrink-0 overflow-hidden rounded-lg bg-muted">
+      <Link href={`/posts/${post.id}`} className="group flex items-center gap-4 px-5 py-3.5 transition-colors duration-150 hover:bg-primary-soft/60">
+        <div className="relative aspect-[9/16] w-11 shrink-0 overflow-hidden rounded-lg bg-muted transition-transform duration-200 ease-spring group-hover:-rotate-3 group-hover:scale-105">
           {thumbUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={thumbUrl} alt="" loading="lazy" className="size-full object-cover" />

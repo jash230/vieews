@@ -238,7 +238,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                 dragging ? "border-primary bg-primary-soft" : "border-border bg-surface",
               )}
             >
-              <span className="grid size-12 place-items-center rounded-2xl bg-background text-primary shadow-sm">
+              <span className="grid size-14 animate-float place-items-center rounded-2xl bg-background text-primary shadow-pop">
                 <UploadCloud className="size-6" aria-hidden />
               </span>
               <p className="mt-4 font-semibold">Drag a video or photo here</p>
@@ -272,8 +272,8 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                 <div className="mt-2" aria-live="polite">
                   {upload.status === "uploading" && (
                     <div className="flex items-center gap-3">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border" role="progressbar" aria-valuenow={Math.round(upload.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
-                        <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${upload.progress * 100}%` }} />
+                      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(upload.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+                        <div className="stripes h-full animate-stripes rounded-full bg-accent transition-[width] duration-300" style={{ width: `${upload.progress * 100}%` }} />
                       </div>
                       <span className="text-xs font-semibold tabular-nums text-muted-foreground">{Math.round(upload.progress * 100)}%</span>
                     </div>
@@ -521,8 +521,8 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
 
       {/* Preview + publish */}
       <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-        <div className="mx-auto w-full max-w-[13rem] rounded-[2.25rem] sm:max-w-[17rem] border-[6px] border-slate-900 bg-slate-900 shadow-lg">
-          <div className={cn("relative overflow-hidden rounded-[1.75rem] bg-slate-800", vertical ? "aspect-[9/16]" : "aspect-[9/16] flex items-center")}>
+        <div className="mx-auto w-full max-w-[13rem] rounded-[2.25rem] sm:max-w-[17rem] border-[6px] border-foreground bg-foreground shadow-lg">
+          <div className={cn("relative overflow-hidden rounded-[1.75rem] bg-muted-foreground", vertical ? "aspect-[9/16]" : "aspect-[9/16] flex items-center")}>
             {previewUrl && file?.type.startsWith("video/") && (
               <video src={previewUrl} controls playsInline muted loop className="size-full object-contain" aria-label="Preview" />
             )}
@@ -531,7 +531,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
               <img src={previewUrl} alt="Preview" className="size-full object-contain" />
             )}
             {!previewUrl && (
-              <div className="grid size-full place-items-center text-center text-sm text-slate-400">
+              <div className="grid size-full place-items-center text-center text-sm font-semibold text-brand-tea">
                 <span className="px-6">Your preview shows up here</span>
               </div>
             )}

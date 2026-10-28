@@ -1,0 +1,15 @@
+<!-- Vieews app icon. Same mark as src/components/app/logo.tsx: three points at the top (the V's tips and the dot) meeting at one, i.e. one video going out to three platforms. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#13304F"/>
+      <stop offset="1" stop-color="#011936"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- 24-unit logo glyph scaled to ~620px and centred on its visual mass. -->
+  <g transform="translate(512 548) scale(26) translate(-12 -12.5)" fill="none" stroke="#C0DFA1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6l8 13 8-13"/>
+    <circle cx="12" cy="6" r="1.55" fill="#9FC490" stroke="none"/>
+  </g>
+</svg>

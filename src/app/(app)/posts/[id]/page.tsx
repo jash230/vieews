@@ -35,7 +35,7 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
       </Link>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Post details</h1>
+          <h1 className="font-display text-[28px] font-semibold tracking-tight">Post details</h1>
           <StatusBadge status={post.status} />
         </div>
         {post.status === "scheduled" && <CancelPostButton postId={post.id} />}

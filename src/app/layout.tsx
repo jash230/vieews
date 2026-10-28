@@ -1,10 +1,16 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Fredoka, Nunito } from "next/font/google";
 import "./globals.css";
 
-const jakarta = Plus_Jakarta_Sans({
-  variable: "--font-jakarta",
+const nunito = Nunito({
+  variable: "--font-nunito",
+  subsets: ["latin"],
+  display: "swap",
+});
+
+const fredoka = Fredoka({
+  variable: "--font-fredoka",
   subsets: ["latin"],
   display: "swap",
 });
@@ -24,10 +30,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <ClerkProvider
       appearance={{
-        variables: { colorPrimary: "#e11d48", borderRadius: "0.75rem", fontFamily: "var(--font-jakarta)" },
+        variables: { colorPrimary: "#011936", borderRadius: "0.75rem", fontFamily: "var(--font-nunito)" },
       }}
     >
-      <html lang="en" className={`${jakarta.variable} h-full`}>
+      <html lang="en" className={`${nunito.variable} ${fredoka.variable} h-full`}>
         <body className="min-h-dvh bg-background text-foreground">{children}</body>
       </html>
     </ClerkProvider>

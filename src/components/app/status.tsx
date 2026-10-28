@@ -1,13 +1,15 @@
-import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, UploadCloud, XCircle } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Clock, UploadCloud, XCircle } from "lucide-react";
+import { Loader } from "@/components/ui/loader";
 import type { PostStatus, TargetStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const STATUS: Record<PostStatus | TargetStatus, { label: string; icon: typeof Clock; className: string; spin?: boolean }> = {
+// `icon: null` shows the bouncing loader dots for in-flight states.
+const STATUS: Record<PostStatus | TargetStatus, { label: string; icon: typeof Clock | null; className: string }> = {
   scheduled: { label: "Scheduled", icon: Clock, className: "bg-accent-soft text-accent" },
   pending: { label: "Queued", icon: Clock, className: "bg-muted text-muted-foreground" },
-  publishing: { label: "Publishing", icon: Loader2, className: "bg-warning-soft text-warning", spin: true },
+  publishing: { label: "Publishing", icon: null, className: "bg-warning-soft text-warning" },
   uploading: { label: "Uploading", icon: UploadCloud, className: "bg-warning-soft text-warning" },
-  processing: { label: "Processing", icon: Loader2, className: "bg-warning-soft text-warning", spin: true },
+  processing: { label: "Processing", icon: null, className: "bg-warning-soft text-warning" },
   published: { label: "Published", icon: CheckCircle2, className: "bg-success-soft text-success" },
   partial: { label: "Partly published", icon: AlertTriangle, className: "bg-warning-soft text-warning" },
   failed: { label: "Failed", icon: XCircle, className: "bg-destructive-soft text-destructive" },
@@ -19,7 +21,7 @@ export function StatusBadge({ status, className }: { status: PostStatus | Target
   const Icon = s.icon;
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.className, className)}>
-      <Icon className={cn("size-3.5", s.spin && "animate-spin")} aria-hidden />
+      {Icon ? <Icon className="size-3.5" aria-hidden /> : <Loader variant="dots" size={14} label={null} />}
       {s.label}
     </span>
   );

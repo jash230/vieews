@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const control =
-  "w-full rounded-xl border border-border bg-background px-3.5 text-base text-foreground shadow-sm transition-colors duration-150 placeholder:text-subtle-foreground hover:border-border-strong focus-visible:border-primary focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/15 aria-invalid:border-destructive sm:text-sm";
+  "w-full rounded-xl border border-border bg-background px-3.5 text-base text-foreground shadow-sm transition-colors duration-150 placeholder:text-subtle-foreground hover:border-border-strong focus-visible:border-accent focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-tea/60 aria-invalid:border-destructive sm:text-sm";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(control, "min-h-11", className)} {...props} />;
@@ -97,11 +97,11 @@ export function Switch({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-50",
+          "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-200 disabled:opacity-50",
           checked ? "bg-primary" : "bg-border-strong",
         )}
       >
-        <span className={cn("inline-block size-5 rounded-full bg-white shadow-sm transition-transform duration-200", checked ? "translate-x-5.5" : "translate-x-0.5")} />
+        <span className={cn("inline-block size-6 rounded-full bg-background shadow-sm transition-[translate,background-color] duration-300 ease-spring", checked ? "translate-x-5.5 bg-brand-tea" : "translate-x-0.5")} />
       </button>
     </div>
   );

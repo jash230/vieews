@@ -41,8 +41,8 @@ export default async function PostsPage({ searchParams }: PageProps<"/posts">) {
             href={f.key === "all" ? "/posts" : `/posts?filter=${f.key}`}
             aria-current={f.key === filter.key ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-10 shrink-0 items-center rounded-full border px-4 text-sm font-medium transition-colors duration-150",
-              f.key === filter.key ? "border-primary bg-primary-soft text-primary" : "border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
+              "inline-flex min-h-10 shrink-0 items-center rounded-full border px-4 text-sm font-semibold transition-[background-color,border-color,color,translate] duration-200 ease-spring hover:-translate-y-0.5",
+              f.key === filter.key ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
             )}
           >
             {f.label}
