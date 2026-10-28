@@ -49,6 +49,7 @@ Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entr
 - Hero: Fredoka headline "Upload once. Post to [word]" where `WordRotate` cycles everywhere → YouTube → Instagram → TikTok over a tea-green marker. Screen readers get the static sentence.
 - `PlatformOrbit`: social platform tiles on a tilted ring spinning in 3D around the Vieews mark. Pure CSS, so tiles grow at the front and shrink at the back through perspective. It never stops: no hover pause, and under reduced motion it is exempt from the global cut-off and turns slower (90s per lap) instead.
 - Header holds only the logo; "Get started" is the way in.
+- From 1024px up, the hero and feature cards fill the first screen and the column widens past the app's `max-w-6xl` (`max-w-7xl`, 88rem from 1536px), so laptops get a full-screen first view. Below 1024px it flows normally.
 - Floating palette blobs, stagger-in feature cards, and a Prussian CTA band.
 
 ## Third-party components (21st.dev)

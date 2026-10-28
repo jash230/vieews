@@ -22,7 +22,7 @@ const ORBIT: { icon: SimpleIcon; tile?: string; color?: string }[] = [
  */
 export function PlatformOrbit({ className }: { className?: string }) {
   return (
-    <div className={`orbit relative grid aspect-[5/4] w-full max-w-[22rem] place-items-center sm:max-w-[32rem] ${className ?? ""}`} aria-hidden>
+    <div className={`orbit relative grid aspect-[5/4] w-full max-w-[22rem] place-items-center sm:max-w-[32rem] lg:aspect-[3/2] ${className ?? ""}`} aria-hidden>
       {/* Soft ground shadow under the ring. */}
       <div className="absolute inset-x-[12%] top-1/2 h-[28%] -translate-y-1/4 rounded-[50%] bg-brand-tea/40 blur-2xl" />
       <div className="orbit-plane relative size-0">

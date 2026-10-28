@@ -14,6 +14,9 @@ const FEATURES = [
   { icon: Bot, title: "AI-ready", body: "A built-in MCP server lets Claude upload and schedule posts for you.", tile: "bg-brand-teal/35" },
 ];
 
+// The column widens on laptops and desktops so the page doesn't sit in a narrow strip.
+const SHELL = "mx-auto max-w-6xl px-4 sm:px-6 lg:max-w-7xl lg:px-10 2xl:max-w-[88rem]";
+
 async function RedirectSignedIn() {
   const { userId } = await auth();
   if (userId) redirect("/dashboard");
@@ -30,58 +33,61 @@ export default function Home() {
       <div className="pointer-events-none absolute -right-24 top-40 size-96 animate-float rounded-full bg-brand-teal/25 blur-3xl [animation-delay:-2s]" aria-hidden />
       <div className="pointer-events-none absolute left-1/3 top-[36rem] size-80 animate-float rounded-full bg-brand-olive/25 blur-3xl [animation-delay:-4s]" aria-hidden />
 
-      <header className="relative mx-auto max-w-6xl px-4 py-4 sm:px-6">
+      <header className={`relative py-4 ${SHELL}`}>
         <Logo />
       </header>
 
-      <main className="relative mx-auto max-w-6xl px-4 pb-20 pt-10 sm:px-6 sm:pt-16">
-        <section className="grid items-center gap-6 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
-          <div className="text-center lg:text-left">
-            <div className="mb-6 inline-flex animate-fade-up items-center gap-3 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold text-muted-foreground shadow-sm">
-              {(["youtube", "instagram", "tiktok"] as const).map((p, i) => (
-                <span key={p} className="animate-hop" style={{ animationDelay: `${i * 160}ms` }}>
-                  <PlatformIcon platform={p} />
+      <main className={`relative pb-20 ${SHELL}`}>
+        {/* From laptop size up, the hero and feature cards fill the first screen (4.75rem is the header). */}
+        <div className="flex flex-col pt-10 sm:pt-16 lg:min-h-[calc(100dvh-4.75rem)] lg:pb-10 lg:pt-4">
+          <section className="grid items-center gap-6 lg:flex-1 lg:grid-cols-[1.05fr_1fr] lg:gap-10">
+            <div className="text-center lg:text-left">
+              <div className="mb-6 inline-flex animate-fade-up items-center gap-3 rounded-full border border-border bg-background px-4 py-2 text-sm font-semibold text-muted-foreground shadow-sm">
+                {(["youtube", "instagram", "tiktok"] as const).map((p, i) => (
+                  <span key={p} className="animate-hop" style={{ animationDelay: `${i * 160}ms` }}>
+                    <PlatformIcon platform={p} />
+                  </span>
+                ))}
+                <span>One upload, three platforms</span>
+              </div>
+              <h1 className="animate-fade-up font-display text-5xl font-semibold leading-[1.05] tracking-tight [animation-delay:80ms] sm:text-7xl lg:text-6xl xl:text-7xl 2xl:text-8xl">
+                Upload once.
+                <br />
+                Post to{" "}
+                <span className="relative inline-block">
+                  <span className="absolute inset-x-[-0.1em] bottom-[0.08em] h-[0.42em] -rotate-1 rounded-full bg-brand-tea" aria-hidden />
+                  <WordRotate words={["everywhere", "YouTube", "Instagram", "TikTok"]} className="relative -mb-[0.15em] pb-[0.15em]" aria-hidden />
+                  <span className="sr-only">YouTube, Instagram and TikTok</span>
                 </span>
-              ))}
-              <span>One upload, three platforms</span>
+              </h1>
+              <p className="mx-auto mt-6 max-w-xl animate-fade-up text-lg leading-relaxed text-muted-foreground [animation-delay:160ms] lg:mx-0 2xl:text-xl">
+                Publish Reels, Shorts and TikToks to all your accounts from one place, on your schedule.
+              </p>
+              <div className="mt-8 flex animate-fade-up justify-center [animation-delay:240ms] lg:justify-start">
+                <ButtonLink href="/sign-in" className="min-h-12 px-7 text-base">
+                  Get started <ArrowRight className="transition-[translate] duration-200 ease-spring group-hover/button:translate-x-1" aria-hidden />
+                </ButtonLink>
+              </div>
             </div>
-            <h1 className="animate-fade-up font-display text-5xl font-semibold leading-[1.05] tracking-tight [animation-delay:80ms] sm:text-7xl lg:text-6xl xl:text-7xl">
-              Upload once.
-              <br />
-              Post to{" "}
-              <span className="relative inline-block">
-                <span className="absolute inset-x-[-0.1em] bottom-[0.08em] h-[0.42em] -rotate-1 rounded-full bg-brand-tea" aria-hidden />
-                <WordRotate words={["everywhere", "YouTube", "Instagram", "TikTok"]} className="relative -mb-[0.15em] pb-[0.15em]" aria-hidden />
-                <span className="sr-only">YouTube, Instagram and TikTok</span>
-              </span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-xl animate-fade-up text-lg leading-relaxed text-muted-foreground [animation-delay:160ms] lg:mx-0">
-              Publish Reels, Shorts and TikToks to all your accounts from one place, on your schedule.
-            </p>
-            <div className="mt-8 flex animate-fade-up justify-center [animation-delay:240ms] lg:justify-start">
-              <ButtonLink href="/sign-in" className="min-h-12 px-7 text-base">
-                Get started <ArrowRight className="transition-[translate] duration-200 ease-spring group-hover/button:translate-x-1" aria-hidden />
-              </ButtonLink>
-            </div>
-          </div>
-          <PlatformOrbit className="mx-auto animate-pop-in [animation-delay:200ms]" />
-        </section>
+            <PlatformOrbit className="mx-auto animate-pop-in [animation-delay:200ms] xl:max-w-[36rem] 2xl:max-w-[40rem]" />
+          </section>
 
-        <ul className="mt-16 grid gap-4 sm:grid-cols-3 lg:mt-20">
-          {FEATURES.map(({ icon: Icon, title, body, tile }, i) => (
-            <li
-              key={title}
-              className="animate-fade-up rounded-3xl border border-border bg-background p-6 shadow-sm"
-              style={{ animationDelay: `${320 + i * 90}ms` }}
-            >
-              <span className={`grid size-12 place-items-center rounded-2xl text-primary ${tile}`}>
-                <Icon className="size-5" aria-hidden />
-              </span>
-              <h2 className="mt-4 font-display text-xl font-semibold">{title}</h2>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{body}</p>
-            </li>
-          ))}
-        </ul>
+          <ul className="mt-16 grid gap-4 sm:grid-cols-3 lg:mt-12">
+            {FEATURES.map(({ icon: Icon, title, body, tile }, i) => (
+              <li
+                key={title}
+                className="animate-fade-up rounded-3xl border border-border bg-background p-6 shadow-sm"
+                style={{ animationDelay: `${320 + i * 90}ms` }}
+              >
+                <span className={`grid size-12 place-items-center rounded-2xl text-primary ${tile}`}>
+                  <Icon className="size-5" aria-hidden />
+                </span>
+                <h2 className="mt-4 font-display text-xl font-semibold">{title}</h2>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
 
         <section className="relative mt-16 overflow-hidden rounded-[2rem] bg-primary px-6 py-12 text-center text-on-primary sm:px-12">
           <div className="pointer-events-none absolute -right-10 -top-10 size-48 animate-float rounded-full bg-brand-olive/30 blur-2xl" aria-hidden />

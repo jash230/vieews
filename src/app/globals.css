@@ -212,7 +212,14 @@ summary {
 }
 @media (min-width: 1024px) {
   .orbit { --r: 215px; }
-}.orbit-plane {
+}
+@media (min-width: 1280px) {
+  .orbit { --r: 235px; }
+}
+@media (min-width: 1536px) {
+  .orbit { --r: 265px; }
+}
+.orbit-plane {
   transform: rotateX(var(--tilt));
   transform-style: preserve-3d;
 }
