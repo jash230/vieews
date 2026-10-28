@@ -1,8 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { formatDistanceToNow } from "date-fns";
 import { Bot } from "lucide-react";
+import { Suspense } from "react";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/ui/misc";
+import { PageHeader, Skeleton } from "@/components/ui/misc";
 import { env } from "@/lib/env";
 import { listApiKeys } from "@/lib/mcp/api-keys";
 import { ApiKeyManager } from "./api-key-manager";
@@ -18,25 +19,14 @@ const TOOLS = [
   ["cancel_post / retry_post_target", "Fix scheduling mistakes and failures"],
 ];
 
-export default async function SettingsPage() {
-  const { userId } = await auth.protect();
-  const keys = await listApiKeys(userId);
-  const mcpUrl = `${env.appUrl()}/api/mcp`;
-
+export default function SettingsPage() {
   return (
     <>
       <PageHeader title="AI & API keys" description="Let Claude or another MCP client upload and post for you." />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <ApiKeyManager
-          mcpUrl={mcpUrl}
-          keys={keys.map((k) => ({
-            id: k.id,
-            name: k.name,
-            prefix: k.key_prefix,
-            created: formatDistanceToNow(new Date(k.created_at), { addSuffix: true }),
-            lastUsed: k.last_used_at ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true }) : null,
-          }))}
-        />
+        <Suspense fallback={<ApiKeysSkeleton />}>
+          <ApiKeys />
+        </Suspense>
         <Card className="h-fit">
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -60,5 +50,33 @@ export default async function SettingsPage() {
         </Card>
       </div>
     </>
+  );
+}
+
+function ApiKeysSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true">
+      <Skeleton className="h-48 rounded-3xl" />
+      <Skeleton className="h-96 rounded-3xl" />
+    </div>
+  );
+}
+
+async function ApiKeys() {
+  const { userId } = await auth.protect();
+  const keys = await listApiKeys(userId);
+  const mcpUrl = `${env.appUrl()}/api/mcp`;
+
+  return (
+    <ApiKeyManager
+      mcpUrl={mcpUrl}
+      keys={keys.map((k) => ({
+        id: k.id,
+        name: k.name,
+        prefix: k.key_prefix,
+        created: formatDistanceToNow(new Date(k.created_at), { addSuffix: true }),
+        lastUsed: k.last_used_at ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true }) : null,
+      }))}
+    />
   );
 }

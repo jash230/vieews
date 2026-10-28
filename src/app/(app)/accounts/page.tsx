@@ -1,8 +1,9 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { Suspense } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Notice, PageHeader } from "@/components/ui/misc";
+import { Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
 import { isPlatformConfigured, PLATFORM_ENV } from "@/lib/env";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,26 @@ const NOTES: Record<Platform, string> = {
   tiktok: "Posts videos directly. Until TikTok audits your app, posts are only visible to you.",
 };
 
-export default async function AccountsPage({ searchParams }: PageProps<"/accounts">) {
+export default function AccountsPage({ searchParams }: PageProps<"/accounts">) {
+  return (
+    <>
+      <PageHeader title="Accounts" description="Connect the accounts you want to post to." />
+      <Suspense fallback={<AccountsSkeleton />}>
+        <PlatformCards searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+function AccountsSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+      {PLATFORMS.map((platform) => <Skeleton key={platform} className="h-56 rounded-3xl" />)}
+    </div>
+  );
+}
+
+async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "searchParams">) {
   const { userId } = await auth.protect();
   const [accounts, sp] = await Promise.all([listAccounts(userId), searchParams]);
   const connected = typeof sp.connected === "string" ? (sp.connected as Platform) : null;
@@ -26,7 +46,6 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
 
   return (
     <>
-      <PageHeader title="Accounts" description="Connect the accounts you want to post to." />
       {connected && PLATFORM_META[connected] && (
         <Notice tone="success" className="mb-6">{PLATFORM_META[connected].label} connected.</Notice>
       )}
