@@ -60,6 +60,7 @@ Both use `motion`.
 
 ## Layout
 Mobile-first. ≥1024px: 256px sidebar. Below: sticky top bar + right sheet menu (Esc and scrim close it). Content `max-w-6xl`, gutters 16 / 24 / 40px.
+Main + side-column pages (dashboard, compose, AI & API keys) go two-column at ≥1280px, since the sidebar leaves too little room at 1024px. Grid tracks that hold text use `minmax(0,1fr)`, never a bare `1fr`, so a long line (a caption, a code snippet) can't push the side column off-screen. Code snippets wrap instead of scrolling.
 
 ## Accessibility
 Focus ring 2px `--ring` with 2px offset on every focusable element. Skip link in the app shell. `aria-current` on nav, `role="switch"` on toggles, `aria-live` for upload progress and validation. Decorative motion (blobs, orbit, rotating word) is `aria-hidden`.

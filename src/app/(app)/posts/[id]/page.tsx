@@ -41,7 +41,7 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
         {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
+      <div className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
         <Card className="h-fit overflow-hidden">
           <div className="aspect-[9/16] bg-slate-900">
             {mediaUrl && post.media?.kind === "video" && (

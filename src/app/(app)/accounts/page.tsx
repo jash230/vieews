@@ -32,7 +32,7 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
       )}
       {error && <Notice tone="error" className="mb-6">{error}</Notice>}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {PLATFORMS.map((platform, i) => {
           const list = accounts.filter((a) => a.platform === platform);
           const meta = PLATFORM_META[platform];

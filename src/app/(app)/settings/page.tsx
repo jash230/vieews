@@ -26,7 +26,7 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader title="AI & API keys" description="Let Claude or another MCP client upload and post for you." />
-      <div className="grid gap-6 lg:grid-cols-[1fr_22rem]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <ApiKeyManager
           mcpUrl={mcpUrl}
           keys={keys.map((k) => ({

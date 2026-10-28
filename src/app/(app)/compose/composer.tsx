@@ -217,7 +217,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
   const vertical = mediaInfo ? isVertical(mediaInfo) : true;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="min-w-0 space-y-6">
         {/* 1. Media */}
         <Section step={1} title="Media" description="Vertical 9:16 video works best on every platform.">
@@ -520,7 +520,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
       </div>
 
       {/* Preview + publish */}
-      <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+      <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
         <div className="mx-auto w-full max-w-[13rem] rounded-[2.25rem] sm:max-w-[17rem] border-[6px] border-foreground bg-foreground shadow-lg">
           <div className={cn("relative overflow-hidden rounded-[1.75rem] bg-muted-foreground", vertical ? "aspect-[9/16]" : "aspect-[9/16] flex items-center")}>
             {previewUrl && file?.type.startsWith("video/") && (

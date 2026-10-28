@@ -22,7 +22,7 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
     <div>
       <p className="mb-1.5 text-sm font-medium">{label}</p>
       <div className="relative">
-        <pre className="overflow-x-auto rounded-xl border border-border bg-surface p-3.5 pr-14 text-[13px] leading-relaxed"><code>{text}</code></pre>
+        <pre className="whitespace-pre-wrap rounded-xl border border-border bg-surface p-3.5 pr-14 text-[13px] leading-relaxed [overflow-wrap:anywhere]"><code>{text}</code></pre>
         <button
           type="button"
           aria-label={copied ? "Copied" : `Copy ${label}`}

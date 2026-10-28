@@ -71,7 +71,7 @@ export default async function DashboardPage() {
           />
         </Card>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="space-y-6">
             {upcoming.length > 0 && (
               <Card>
