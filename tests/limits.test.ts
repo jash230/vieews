@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateTarget, type MediaInfo } from "@/lib/platforms/limits";
+import { validateItems, validateMedia, validateTarget, type MediaInfo } from "@/lib/platforms/limits";
 
 const MB = 1024 * 1024;
 const reel: MediaInfo = { kind: "video", mime: "video/mp4", sizeBytes: 40 * MB, width: 1080, height: 1920, durationS: 30 };
@@ -19,9 +19,12 @@ describe("validateTarget", () => {
     expect(validateTarget(reel, "", { platform: "youtube", youtube: { title: "x".repeat(101), privacy: "public" } })[0].message).toMatch(/101\/100/);
   });
 
-  it("rejects images on YouTube and TikTok", () => {
+  it("rejects images on YouTube; takes JPEG or WebP photos on TikTok", () => {
     expect(validateTarget(photo, "", { platform: "youtube", youtube: { title: "t", privacy: "public" } }).some((i) => i.field === "media")).toBe(true);
-    expect(validateTarget(photo, "", { platform: "tiktok", tiktok }).some((i) => i.field === "media")).toBe(true);
+    expect(validateTarget(photo, "", { platform: "tiktok", tiktok })).toEqual([]);
+    expect(validateTarget({ ...photo, mime: "image/webp" }, "", { platform: "tiktok", tiktok })).toEqual([]);
+    expect(validateTarget({ ...photo, mime: "image/png" }, "", { platform: "tiktok", tiktok })[0].message).toMatch(/JPEG or WebP/);
+    expect(validateTarget({ ...photo, sizeBytes: 21 * MB }, "", { platform: "tiktok", tiktok })[0].message).toMatch(/20 MB/);
   });
 
   it("enforces Instagram format, hashtag and JPEG rules", () => {
@@ -44,5 +47,32 @@ describe("validateTarget", () => {
 
   it("blocks private branded content on TikTok", () => {
     expect(validateTarget(reel, "", { platform: "tiktok", tiktok: { ...tiktok, brandedContent: true } })[0].field).toBe("options");
+  });
+});
+
+describe("carousels", () => {
+  const slides = (n: number, m: Partial<MediaInfo> = {}) => Array.from({ length: n }, () => ({ ...photo, ...m }));
+  const igPost = { platform: "instagram", instagram: { format: "post" } } as const;
+
+  it("accepts photo carousels on TikTok and Instagram", () => {
+    expect(validateMedia(slides(6), "", { platform: "tiktok", tiktok })).toEqual([]);
+    expect(validateMedia(slides(6), "", igPost)).toEqual([]);
+  });
+
+  it("enforces per-platform photo counts", () => {
+    expect(validateItems(slides(11), igPost)[0].message).toMatch(/2–10 photos/);
+    expect(validateItems(slides(36), { platform: "tiktok", tiktok })[0].message).toMatch(/35 photos/);
+    expect(validateItems(slides(1), igPost)).toEqual([]);
+  });
+
+  it("rejects mixed media, YouTube carousels and non-post Instagram formats", () => {
+    expect(validateItems([photo, reel], { platform: "tiktok", tiktok })[0].message).toMatch(/only contain photos/);
+    expect(validateItems(slides(3), { platform: "youtube", youtube: { title: "t", privacy: "public" } })[0].message).toMatch(/YouTube/);
+    expect(validateItems(slides(3), { platform: "instagram", instagram: { format: "story" } })[0].message).toMatch(/as a Post/);
+  });
+
+  it("reports a problem shared by every slide once", () => {
+    const issues = validateMedia(slides(5, { mime: "image/png" }), "", igPost);
+    expect(issues.filter((i) => /JPEG/.test(i.message))).toHaveLength(1);
   });
 });

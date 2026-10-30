@@ -1,6 +1,8 @@
 import { env } from "@/lib/env";
+import type { TikTokOptions } from "@/lib/types";
 import { fetchRange, form, scopesFrom } from "./http";
-import { expectOk, expiresSoon, PlatformError, type PlatformAdapter } from "./types";
+import { LIMITS } from "./limits";
+import { expectOk, expiresSoon, PlatformError, type PlatformAdapter, type PublishContext } from "./types";
 
 const API = "https://open.tiktokapis.com/v2";
 const SCOPES = ["user.info.basic", "video.publish", "video.upload"];
@@ -145,6 +147,7 @@ export const tiktok: PlatformAdapter = {
 
   async publish(ctx) {
     if (ctx.options.platform !== "tiktok") throw new Error("Wrong options for TikTok");
+    if (ctx.media.kind === "image") return publishPhotos(ctx);
     const o = ctx.options.tiktok;
     const size = ctx.media.size_bytes;
     const plan = tiktokChunkPlan(size);
@@ -196,28 +199,74 @@ export const tiktok: PlatformAdapter = {
       return true;
     });
 
-    await ctx.setStatus("processing");
-    for (let i = 0; i < MAX_STATUS_CHECKS; i++) {
-      const status = await ctx.run(`tiktok-status-${i}`, async () => {
-        const res = await fetch(`${API}/post/publish/status/fetch/`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${await ctx.accessToken()}`, "Content-Type": "application/json; charset=UTF-8" },
-          body: JSON.stringify({ publish_id: init.publishId }),
-        });
-        const { data } = await ttJson(res, "TikTok publish status");
-        // (sic) TikTok's field name is misspelled.
-        const ids: string[] = data.publicaly_available_post_id ?? [];
-        return { status: data.status as string, failReason: (data.fail_reason as string | undefined) ?? null, postId: ids[0] ? String(ids[0]) : null };
-      });
-      if (status.status === "PUBLISH_COMPLETE") {
-        return {
-          remoteId: status.postId ?? init.publishId,
-          remoteUrl: status.postId && init.username ? `https://www.tiktok.com/@${init.username}/video/${status.postId}` : null,
-        };
-      }
-      if (status.status === "FAILED") throw new PlatformError(`TikTok rejected the post: ${status.failReason ?? "unknown reason"}`, { retryable: false });
-      await ctx.sleep(`tiktok-wait-${i}`, "15s");
-    }
-    throw new PlatformError("TikTok is still processing after 10 minutes. Check the TikTok app.", { retryable: false });
+    return waitForPublish(ctx, init.publishId, init.username);
   },
 };
+
+/** Builds the photo-post request body. Exported for tests. */
+export function photoPostBody(o: TikTokOptions, info: TikTokCreatorInfo, caption: string, photoUrls: string[]) {
+  const firstLine = caption.split("\n")[0]?.trim() ?? "";
+  return {
+    post_info: {
+      title: [...firstLine].slice(0, LIMITS.tiktok.photoTitleMax).join(""),
+      description: caption,
+      privacy_level: o.privacyLevel,
+      disable_comment: o.disableComment || info.commentDisabled,
+      auto_add_music: o.autoAddMusic ?? true,
+      brand_content_toggle: o.brandedContent,
+      brand_organic_toggle: o.brandOrganic,
+    },
+    source_info: { source: "PULL_FROM_URL", photo_cover_index: 0, photo_images: photoUrls },
+    post_mode: "DIRECT_POST",
+    media_type: "PHOTO",
+    is_aigc: o.isAigc ?? false,
+  };
+}
+
+/** Photo posts (one photo or a carousel): TikTok pulls the images from our verified domain. */
+async function publishPhotos(ctx: PublishContext) {
+  if (ctx.options.platform !== "tiktok") throw new Error("Wrong options for TikTok");
+  const o = ctx.options.tiktok;
+  const init = await ctx.run("tiktok-photo-init", async () => {
+    const token = await ctx.accessToken();
+    const info = await getCreatorInfo(token);
+    if (!info.privacyLevelOptions.includes(o.privacyLevel)) {
+      throw new PlatformError(`TikTok no longer allows "${o.privacyLevel}" for this account. Options: ${info.privacyLevelOptions.join(", ")}`, { retryable: false });
+    }
+    const res = await fetch(`${API}/post/publish/content/init/`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=UTF-8" },
+      body: JSON.stringify(photoPostBody(o, info, ctx.caption, ctx.appItemUrls())),
+    });
+    const { data } = await ttJson(res, "TikTok photo post");
+    return { publishId: data.publish_id as string, username: info.creatorUsername };
+  });
+  return waitForPublish(ctx, init.publishId, init.username);
+}
+
+async function waitForPublish(ctx: PublishContext, publishId: string, username: string) {
+  await ctx.setStatus("processing");
+  const kind = ctx.media.kind === "image" ? "photo" : "video";
+  for (let i = 0; i < MAX_STATUS_CHECKS; i++) {
+    const status = await ctx.run(`tiktok-status-${i}`, async () => {
+      const res = await fetch(`${API}/post/publish/status/fetch/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await ctx.accessToken()}`, "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ publish_id: publishId }),
+      });
+      const { data } = await ttJson(res, "TikTok publish status");
+      // (sic) TikTok's field name is misspelled.
+      const ids: string[] = data.publicaly_available_post_id ?? [];
+      return { status: data.status as string, failReason: (data.fail_reason as string | undefined) ?? null, postId: ids[0] ? String(ids[0]) : null };
+    });
+    if (status.status === "PUBLISH_COMPLETE") {
+      return {
+        remoteId: status.postId ?? publishId,
+        remoteUrl: status.postId && username ? `https://www.tiktok.com/@${username}/${kind}/${status.postId}` : null,
+      };
+    }
+    if (status.status === "FAILED") throw new PlatformError(`TikTok rejected the post: ${status.failReason ?? "unknown reason"}`, { retryable: false });
+    await ctx.sleep(`tiktok-wait-${i}`, "15s");
+  }
+  throw new PlatformError("TikTok is still processing after 10 minutes. Check the TikTok app.", { retryable: false });
+}

@@ -23,6 +23,12 @@ export const env = {
     clientKey: required("TIKTOK_CLIENT_KEY"),
     clientSecret: required("TIKTOK_CLIENT_SECRET"),
   }),
+  /** Signature file TikTok asks you to host to verify the /media/tt/ URL prefix (photo posts). */
+  tiktokUrlVerification: () => {
+    const file = process.env.TIKTOK_URL_VERIFICATION_FILE;
+    const content = process.env.TIKTOK_URL_VERIFICATION_CONTENT;
+    return file && content ? { file, content } : null;
+  },
 };
 
 /** Env vars each platform needs before its OAuth flow can start, and where SETUP.md covers them. */

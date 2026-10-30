@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret, pkceChallenge } from "@/lib/crypto";
+import { decryptSecret, encryptSecret, pkceChallenge, signToken, verifyToken } from "@/lib/crypto";
 
 const key = randomBytes(32).toString("base64");
 
@@ -28,6 +28,17 @@ describe("token encryption", () => {
 
   it("rejects keys that aren't 32 bytes", () => {
     expect(() => encryptSecret("x", "c2hvcnQ=")).toThrow(/32 bytes/);
+  });
+
+  it("signs and verifies tokens per purpose", () => {
+    const token = signToken({ p: "u/a.jpg", e: 1 }, key, "media");
+    expect(verifyToken(token, key, "media")).toEqual({ p: "u/a.jpg", e: 1 });
+    expect(verifyToken(token, key, "other-purpose")).toBeNull();
+    expect(verifyToken(token, randomBytes(32).toString("base64"), "media")).toBeNull();
+    const [body, sig] = token.split(".");
+    const forged = Buffer.from(JSON.stringify({ p: "someone/else.jpg", e: 1 })).toString("base64url");
+    expect(verifyToken(`${forged}.${sig}`, key, "media")).toBeNull();
+    expect(verifyToken(body, key, "media")).toBeNull();
   });
 
   it("computes RFC 7636 PKCE challenges", () => {

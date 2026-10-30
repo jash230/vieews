@@ -40,7 +40,12 @@ export const LIMITS = {
     minDurationS: 3,
     defaultMaxDurationS: 600,
     maxSizeBytes: 4 * 1024 * MB,
+    photoMime: ["image/jpeg", "image/webp"],
+    photoMaxBytes: 20 * MB,
+    photoTitleMax: 90,
+    photosMax: 35,
   },
+  instagramCarousel: { min: 2, max: 10 },
 } as const;
 
 export const CAPTION_MAX: Record<Platform, number> = {
@@ -112,16 +117,55 @@ export function validateTarget(
 
   if (options.platform === "tiktok") {
     const L = LIMITS.tiktok;
-    if (media.kind !== "video") push("media", "TikTok posting here supports video only.");
     if (caption.length > L.captionMax) push("caption", `Caption is ${caption.length}/${L.captionMax} characters.`);
-    if (media.sizeBytes > L.maxSizeBytes) push("media", "TikTok videos must be 4 GB or smaller.");
-    const max = extra.tiktokMaxDurationS ?? L.defaultMaxDurationS;
-    if (d !== null && d > max) push("media", `Your TikTok account allows videos up to ${Math.floor(max / 60)} min.`);
-    if (d !== null && d < L.minDurationS) push("media", "TikTok videos must be at least 3 seconds.");
+    if (media.kind === "image") {
+      if (!(L.photoMime as readonly string[]).includes(media.mime)) push("media", "TikTok photos must be JPEG or WebP.");
+      if (media.sizeBytes > L.photoMaxBytes) push("media", "TikTok photos must be 20 MB or smaller.");
+    } else {
+      if (media.sizeBytes > L.maxSizeBytes) push("media", "TikTok videos must be 4 GB or smaller.");
+      const max = extra.tiktokMaxDurationS ?? L.defaultMaxDurationS;
+      if (d !== null && d > max) push("media", `Your TikTok account allows videos up to ${Math.floor(max / 60)} min.`);
+      if (d !== null && d < L.minDurationS) push("media", "TikTok videos must be at least 3 seconds.");
+    }
     if (!options.tiktok.privacyLevel) push("options", "Choose who can view this TikTok.");
     if (options.tiktok.brandedContent && options.tiktok.privacyLevel === "SELF_ONLY")
       push("options", "Branded content can't be private. Choose another visibility.");
   }
 
   return issues;
+}
+
+/** Rules about the set of media (carousels), on top of validateTarget for each item. */
+export function validateItems(items: MediaInfo[], options: TargetOptions): ValidationIssue[] {
+  const platform = options.platform;
+  const issue = (message: string): ValidationIssue => ({ platform, field: "media", message });
+  if (items.length <= 1) return [];
+  if (items.some((m) => m.kind !== "image")) return [issue("Carousels can only contain photos.")];
+  if (options.platform === "youtube") return [issue("YouTube can't post photo carousels. Post a video instead.")];
+  if (options.platform === "instagram") {
+    const { min, max } = LIMITS.instagramCarousel;
+    if (options.instagram.format !== "post") return [issue("Instagram carousels must be posted as a Post.")];
+    if (items.length < min || items.length > max) return [issue(`Instagram carousels hold ${min}–${max} photos.`)];
+  }
+  if (options.platform === "tiktok" && items.length > LIMITS.tiktok.photosMax) {
+    return [issue(`TikTok photo posts hold up to ${LIMITS.tiktok.photosMax} photos.`)];
+  }
+  return [];
+}
+
+/** validateTarget for every item plus the carousel rules, without repeating identical issues. */
+export function validateMedia(
+  items: MediaInfo[],
+  caption: string,
+  options: TargetOptions,
+  extra: { tiktokMaxDurationS?: number } = {},
+): ValidationIssue[] {
+  const all = [...items.flatMap((m) => validateTarget(m, caption, options, extra)), ...validateItems(items, options)];
+  const seen = new Set<string>();
+  return all.filter((i) => {
+    const key = `${i.field}|${i.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

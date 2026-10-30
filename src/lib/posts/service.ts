@@ -1,10 +1,9 @@
 import "server-only";
 import { EVENTS, inngest } from "@/lib/inngest/client";
-import { validateTarget, type ValidationIssue } from "@/lib/platforms/limits";
-import { getMediaAsset } from "@/lib/media/service";
+import { validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow, PostRow, PostStatus, PostTargetRow, SocialAccountRow } from "@/lib/types";
-import { createPostSchema, type CreatePostInput } from "./schema";
+import { createPostSchema, mediaIdsOf, type CreatePostInput } from "./schema";
 
 export class PostValidationError extends Error {
   constructor(readonly issues: ValidationIssue[] | string[]) {
@@ -15,10 +14,48 @@ export class PostValidationError extends Error {
 
 export interface PostWithTargets extends PostRow {
   targets: (PostTargetRow & { account: Pick<SocialAccountRow, "username" | "display_name" | "avatar_url"> | null })[];
+  /** The cover (first item). */
   media: MediaAssetRow | null;
+  /** All media in order; one item unless the post is a carousel. */
+  items: MediaAssetRow[];
 }
 
-const POST_SELECT = "*, media:media_assets(*), targets:post_targets(*, account:social_accounts(username, display_name, avatar_url))";
+// The cover embed names its foreign key because post_media is a second path to media_assets.
+const POST_SELECT =
+  "*, media:media_assets!posts_media_asset_id_fkey(*), items:post_media(position, media:media_assets(*)), targets:post_targets(*, account:social_accounts(username, display_name, avatar_url))";
+
+type PostSelectRow = Omit<PostWithTargets, "items"> & { items: { position: number; media: MediaAssetRow | null }[] | null };
+
+function withItems(row: PostSelectRow): PostWithTargets {
+  const items = [...(row.items ?? [])]
+    .sort((a, b) => a.position - b.position)
+    .flatMap((i) => (i.media ? [i.media] : []));
+  // Posts created before post_media existed have only media_asset_id.
+  return { ...row, items: items.length ? items : row.media ? [row.media] : [] };
+}
+
+export const mediaInfoOf = (m: MediaAssetRow): MediaInfo => ({
+  kind: m.kind,
+  mime: m.mime,
+  sizeBytes: m.size_bytes,
+  width: m.width,
+  height: m.height,
+  durationS: m.duration_s,
+});
+
+async function loadReadyMedia(userId: string, ids: string[]): Promise<MediaAssetRow[]> {
+  const { data, error } = await supabaseAdmin().from("media_assets").select("*").eq("user_id", userId).in("id", ids);
+  if (error) throw error;
+  const byId = new Map((data as MediaAssetRow[]).map((m) => [m.id, m]));
+  return ids.map((id, i) => {
+    const media = byId.get(id);
+    const label = ids.length > 1 ? `Item ${i + 1}` : "Media";
+    if (!media) throw new PostValidationError([`${label} wasn't found`]);
+    if (media.status !== "ready") throw new PostValidationError([`${label} hasn't finished uploading yet`]);
+    if (media.purged_at) throw new PostValidationError([`${label} was already cleaned up after an earlier post. Upload it again.`]);
+    return media;
+  });
+}
 
 export async function createPost(userId: string, raw: CreatePostInput, source: "web" | "mcp", extra: { tiktokMaxDurationS?: number } = {}) {
   const parsed = createPostSchema.safeParse(raw);
@@ -26,8 +63,8 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
   const input = parsed.data;
   const db = supabaseAdmin();
 
-  const media = await getMediaAsset(userId, input.mediaAssetId);
-  if (media.status !== "ready") throw new PostValidationError(["Media upload hasn't finished yet"]);
+  const items = await loadReadyMedia(userId, mediaIdsOf(input));
+  const media = items[0];
 
   const accountIds = [...new Set(input.targets.map((t) => t.accountId))];
   const { data: accounts, error: accErr } = await db.from("social_accounts").select("id, platform, status").eq("user_id", userId).in("id", accountIds);
@@ -41,14 +78,7 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
     if (!account) problems.push(`Account ${t.accountId} isn't connected`);
     else if (account.platform !== t.options.platform) problems.push(`Account ${t.accountId} is ${account.platform}, not ${t.options.platform}`);
     else if (account.status !== "active") problems.push(`Reconnect your ${account.platform} account before posting`);
-    issues.push(
-      ...validateTarget(
-        { kind: media.kind, mime: media.mime, sizeBytes: media.size_bytes, width: media.width, height: media.height, durationS: media.duration_s },
-        t.captionOverride ?? input.caption,
-        t.options,
-        extra,
-      ),
-    );
+    issues.push(...validateMedia(items.map(mediaInfoOf), t.captionOverride ?? input.caption, t.options, extra));
   }
   if (problems.length) throw new PostValidationError(problems);
   if (issues.length) throw new PostValidationError(issues);
@@ -66,10 +96,20 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
       scheduled_for: isScheduled ? scheduledFor!.toISOString() : null,
       status: isScheduled ? "scheduled" : "publishing",
       source,
+      campaign: input.campaign ?? null,
+      meta: input.meta ?? {},
     })
     .select("*")
     .single();
   if (postErr) throw postErr;
+
+  const { error: mErr } = await db
+    .from("post_media")
+    .insert(items.map((m, position) => ({ post_id: post.id, media_asset_id: m.id, position })));
+  if (mErr) {
+    await db.from("posts").delete().eq("id", post.id);
+    throw mErr;
+  }
 
   const { error: tErr } = await db.from("post_targets").insert(
     input.targets.map((t) => ({
@@ -94,16 +134,22 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
 export async function getPost(userId: string, postId: string): Promise<PostWithTargets> {
   const { data, error } = await supabaseAdmin().from("posts").select(POST_SELECT).eq("user_id", userId).eq("id", postId).single();
   if (error || !data) throw new Error("Post not found");
-  return data as unknown as PostWithTargets;
+  return withItems(data as unknown as PostSelectRow);
 }
 
-export async function listPosts(userId: string, opts: { limit?: number; status?: PostStatus[]; upcoming?: boolean } = {}): Promise<PostWithTargets[]> {
+export async function listPosts(
+  userId: string,
+  opts: { limit?: number; status?: PostStatus[]; upcoming?: boolean; campaign?: string; since?: string; before?: string } = {},
+): Promise<PostWithTargets[]> {
   let q = supabaseAdmin().from("posts").select(POST_SELECT).eq("user_id", userId);
   if (opts.status?.length) q = q.in("status", opts.status);
+  if (opts.campaign) q = q.eq("campaign", opts.campaign);
+  if (opts.since) q = q.gte("created_at", opts.since);
+  if (opts.before) q = q.lt("created_at", opts.before);
   q = opts.upcoming ? q.order("scheduled_for", { ascending: true }) : q.order("created_at", { ascending: false });
   const { data, error } = await q.limit(opts.limit ?? 50);
   if (error) throw error;
-  return (data ?? []) as unknown as PostWithTargets[];
+  return ((data ?? []) as unknown as PostSelectRow[]).map(withItems);
 }
 
 export async function cancelPost(userId: string, postId: string) {
@@ -120,6 +166,8 @@ export async function retryTarget(userId: string, targetId: string) {
   const { data: target, error } = await db.from("post_targets").select("*").eq("user_id", userId).eq("id", targetId).single();
   if (error || !target) throw new Error("Target not found");
   if (target.status !== "failed") throw new Error("Only failed targets can be retried");
+  const post = await getPost(userId, target.post_id);
+  if (post.items.some((m) => m.purged_at)) throw new Error("This post's media was cleaned up to free storage. Create a new post instead.");
   await db.from("post_targets").update({ status: "pending", error: null, finished_at: null }).eq("id", targetId);
   await db.from("posts").update({ status: "publishing" }).eq("id", target.post_id);
   await inngest.send({ name: EVENTS.targetPublish, data: { targetId, accountId: target.social_account_id } });

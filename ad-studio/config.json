@@ -1,0 +1,11 @@
+{
+  "paused": false,
+  "apps": [],
+  "timezone": "America/New_York",
+  "accounts": "all",
+  "youtubePrivacy": "public",
+  "tiktokPrivacy": "most-public",
+  "dailyNeuronBudget": 9000,
+  "imageModel": "@cf/black-forest-labs/flux-2-klein-4b",
+  "voice": "af_heart"
+}

@@ -1,5 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { signToken, verifyToken } from "@/lib/crypto";
+import { env } from "@/lib/env";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
 import { SUPPORTED_MIME } from "@/lib/platforms/limits";
 import type { MediaAssetRow, MediaKind } from "@/lib/types";
@@ -111,6 +113,44 @@ export async function signedReadUrls(paths: string[], expiresInS = 60 * 60): Pro
   if (!unique.length) return {};
   const { data } = await supabaseAdmin().storage.from(MEDIA_BUCKET).createSignedUrls(unique, expiresInS);
   return Object.fromEntries((data ?? []).flatMap((d) => (d.signedUrl && d.path ? [[d.path, d.signedUrl] as const] : [])));
+}
+
+/** Path prefix that serves media from this app's own domain (verified with TikTok for photo posts). */
+export const APP_MEDIA_PREFIX = "/media/tt/";
+const APP_MEDIA_PURPOSE = "app-media-url";
+
+interface AppMediaToken {
+  /** storage path */
+  p: string;
+  /** mime */
+  m: string;
+  /** expiry, epoch seconds */
+  e: number;
+}
+
+/** Signed, expiring URL on this app's domain that streams one stored file. */
+export function appMediaUrl(asset: Pick<MediaAssetRow, "storage_path" | "mime">, expiresInS = 60 * 60): string {
+  const token = signToken(
+    { p: asset.storage_path, m: asset.mime, e: Math.floor(Date.now() / 1000) + expiresInS } satisfies AppMediaToken,
+    env.tokenEncryptionKey(),
+    APP_MEDIA_PURPOSE,
+  );
+  return `${env.appUrl()}${APP_MEDIA_PREFIX}${token}.${EXT[asset.mime] ?? "bin"}`;
+}
+
+/** Reads a token from appMediaUrl; null when it's forged or expired. */
+export function readAppMediaToken(token: string): { storagePath: string; mime: string } | null {
+  const payload = verifyToken<AppMediaToken>(token.replace(/\.[a-z0-9]+$/i, ""), env.tokenEncryptionKey(), APP_MEDIA_PURPOSE);
+  if (!payload || payload.e < Date.now() / 1000) return null;
+  return { storagePath: payload.p, mime: payload.m };
+}
+
+/** Deletes the stored file (not the row or thumbnail) once nothing needs it anymore. */
+export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_path">): Promise<void> {
+  const db = supabaseAdmin();
+  const { error } = await db.storage.from(MEDIA_BUCKET).remove([asset.storage_path]);
+  if (error) throw error;
+  await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
 }
 
 const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;

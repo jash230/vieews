@@ -1,6 +1,7 @@
 import { NonRetriableError } from "inngest";
 import { getValidAccessToken, markNeedsReauth } from "@/lib/accounts/service";
-import { signedReadUrl } from "@/lib/media/service";
+import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsage } from "@/lib/media/cleanup";
+import { appMediaUrl, purgeMediaFile, signedReadUrl } from "@/lib/media/service";
 import { adapters } from "@/lib/platforms";
 import { PlatformError, type PublishContext } from "@/lib/platforms/types";
 import { refreshPostStatus } from "@/lib/posts/service";
@@ -82,9 +83,8 @@ export const publishTarget = inngest.createFunction(
       ]);
       if (!post) throw new NonRetriableError("Post no longer exists");
       if (!account) throw new NonRetriableError("This account was disconnected");
-      const { data: media } = await db.from("media_assets").select("*").eq("id", post.media_asset_id).single();
-      if (!media) throw new NonRetriableError("Media was deleted");
-      return { target: target as PostTargetRow, post: post as PostRow, account: account as SocialAccountRow, media: media as MediaAssetRow };
+      const items = await loadItems(post as PostRow);
+      return { target: target as PostTargetRow, post: post as PostRow, account: account as SocialAccountRow, media: items[0], items };
     };
 
     const initial = await step.run("mark-started", async () => {
@@ -99,12 +99,13 @@ export const publishTarget = inngest.createFunction(
     if (initial.skip) return { skipped: true };
 
     // Rows are re-read on every invocation (they're cheap) so tokens never land in step state.
-    const { target, post, account, media } = await load();
+    const { target, post, account, media, items } = await load();
     const adapter = adapters[target.platform];
 
     const ctx: PublishContext = {
       account,
       media,
+      items,
       caption: target.caption_override ?? post.caption,
       options: target.options,
       run: (id, fn) =>
@@ -122,6 +123,8 @@ export const publishTarget = inngest.createFunction(
       sleep: (id, duration) => step.sleep(id, duration),
       accessToken: () => getValidAccessToken(account),
       mediaUrl: () => signedReadUrl(media.storage_path, 60 * 60),
+      itemUrls: () => Promise.all(items.map((m) => signedReadUrl(m.storage_path, 60 * 60))),
+      appItemUrls: () => items.map((m) => appMediaUrl(m)),
       setStatus: async (status) => {
         await step.run(`status-${status}`, async () => {
           await db.from("post_targets").update({ status }).eq("id", targetId);
@@ -142,4 +145,58 @@ export const publishTarget = inngest.createFunction(
   },
 );
 
-export const functions = [publishPost, publishTarget];
+/** Media in post order. Posts from before carousels only have media_asset_id. */
+async function loadItems(post: PostRow): Promise<MediaAssetRow[]> {
+  const db = supabaseAdmin();
+  const { data: links } = await db.from("post_media").select("media_asset_id, position").eq("post_id", post.id).order("position");
+  const ids = links?.length ? links.map((l) => l.media_asset_id as string) : [post.media_asset_id];
+  const { data: rows } = await db.from("media_assets").select("*").in("id", ids);
+  const byId = new Map(((rows ?? []) as MediaAssetRow[]).map((m) => [m.id, m]));
+  const items = ids.map((id) => byId.get(id));
+  if (items.some((m) => !m || m.purged_at)) throw new NonRetriableError("Media was deleted");
+  return items as MediaAssetRow[];
+}
+
+/**
+ * Frees storage (Supabase's free plan has 1 GB): deletes the stored file once every post using it is
+ * done. The media row and its thumbnail stay so the post history still renders.
+ */
+export const cleanupMedia = inngest.createFunction(
+  { id: "cleanup-media", triggers: [{ cron: "TZ=UTC 30 4 * * *" }] },
+  async ({ step }) => {
+    const candidates = await step.run("find-candidates", async () => {
+      const db = supabaseAdmin();
+      const { data: assets } = await db
+        .from("media_assets")
+        .select("id, storage_path, status, created_at")
+        .is("purged_at", null)
+        .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString())
+        .order("created_at")
+        .limit(500);
+      if (!assets?.length) return [];
+      const { data: links } = await db
+        .from("post_media")
+        .select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)")
+        .in("media_asset_id", assets.map((a) => a.id));
+      // Covers of posts made before post_media existed.
+      const { data: covers } = await db
+        .from("posts")
+        .select("status, published_at, updated_at, media_asset_id")
+        .in("media_asset_id", assets.map((a) => a.id));
+      const usage = new Map<string, PostUsage[]>();
+      const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
+      for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
+      for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
+      return assets
+        .filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()))
+        .map((a) => ({ id: a.id as string, storage_path: a.storage_path as string }));
+    });
+
+    for (const asset of candidates) {
+      await step.run(`purge-${asset.id}`, () => purgeMediaFile(asset));
+    }
+    return { purged: candidates.length };
+  },
+);
+
+export const functions = [publishPost, publishTarget, cleanupMedia];

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CalendarClock, CheckCircle2, Film, Info, RefreshCw, Send, UploadCloud, X } from "lucide-react";
+import { AlertCircle, ArrowUp, CalendarClock, CheckCircle2, Film, ImagePlus, Info, RefreshCw, Send, UploadCloud, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { PlatformBadge, PlatformIcon, PLATFORM_META } from "@/components/app/platform";
@@ -8,13 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
 import { Notice } from "@/components/ui/misc";
-import { CAPTION_MAX, LIMITS, SUPPORTED_MIME, isVertical, validateTarget, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
+import { CAPTION_MAX, LIMITS, SUPPORTED_MIME, isVertical, validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
 import type { TikTokCreatorInfo } from "@/lib/platforms/tiktok";
-import type { CreatePostInput } from "@/lib/posts/schema";
+import { MAX_CAROUSEL_ITEMS, type CreatePostInput } from "@/lib/posts/schema";
 import type { InstagramOptions, Platform, PublicAccount, TargetOptions, TikTokOptions, YouTubeOptions } from "@/lib/types";
 import { cn, formatBytes, formatDuration } from "@/lib/utils";
 import { createPostAction, tiktokCreatorInfoAction } from "../actions";
-import { readMediaMeta, useMediaUpload, type MediaMeta } from "./media";
+import { readMediaMeta, useMediaUploads, type UploadItem } from "./media";
 
 const ACCEPT = [...SUPPORTED_MIME.video, ...SUPPORTED_MIME.image].join(",");
 
@@ -52,16 +52,92 @@ function Section({ step, title, description, children }: { step: number; title: 
   );
 }
 
+function MediaRow({
+  item,
+  position,
+  landscape,
+  onRemove,
+  onMoveUp,
+  onRetry,
+}: {
+  item: UploadItem;
+  /** 1-based place in a carousel, or null for a single file. */
+  position: number | null;
+  landscape: boolean;
+  onRemove: () => void;
+  onMoveUp?: () => void;
+  onRetry: () => void;
+}) {
+  const { file, meta, state, previewUrl } = item;
+  const isImage = file.type.startsWith("image/");
+  return (
+    <li className="flex items-center gap-4 rounded-2xl border border-border bg-surface p-3 sm:p-4">
+      <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-background text-muted-foreground shadow-sm">
+        {isImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={previewUrl} alt="" className="size-full object-cover" />
+        ) : (
+          <Film className="size-5" aria-hidden />
+        )}
+        {position && (
+          <span className="absolute bottom-0.5 right-0.5 rounded-md bg-foreground/80 px-1 text-[10px] font-bold text-background tabular-nums">{position}</span>
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">
+          {file.name}
+          {position === 1 && <span className="ml-2 text-xs font-medium text-muted-foreground">Cover</span>}
+        </p>
+        <p className="text-xs text-muted-foreground tabular-nums">
+          {formatBytes(file.size)}
+          {meta.width && meta.height ? ` · ${meta.width}×${meta.height}` : ""}
+          {meta.durationS ? ` · ${formatDuration(meta.durationS)}` : ""}
+          {landscape && " · landscape"}
+        </p>
+        <div className="mt-2" aria-live="polite">
+          {state.status === "uploading" && (
+            <div className="flex items-center gap-3">
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(state.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Upload progress for ${file.name}`}>
+                <div className="stripes h-full animate-stripes rounded-full bg-accent transition-[width] duration-300" style={{ width: `${state.progress * 100}%` }} />
+              </div>
+              <span className="text-xs font-semibold tabular-nums text-muted-foreground">{Math.round(state.progress * 100)}%</span>
+            </div>
+          )}
+          {state.status === "done" && (
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-success"><CheckCircle2 className="size-3.5" aria-hidden />Uploaded</p>
+          )}
+          {state.status === "error" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-destructive"><AlertCircle className="size-3.5" aria-hidden />{state.error}</p>
+              <Button size="sm" variant="secondary" onClick={onRetry}>
+                <RefreshCw aria-hidden /> Retry
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+      {onMoveUp && (
+        <button type="button" onClick={onMoveUp} aria-label={`Move ${file.name} earlier`} className="grid size-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
+          <ArrowUp className="size-5" aria-hidden />
+        </button>
+      )}
+      <button type="button" onClick={onRemove} aria-label={`Remove ${file.name}`} className="grid size-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
+        <X className="size-5" aria-hidden />
+      </button>
+    </li>
+  );
+}
+
 export function Composer({ accounts }: { accounts: PublicAccount[] }) {
   const router = useRouter();
   const ids = useId();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [meta, setMeta] = useState<MediaMeta | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const { state: upload, upload: startUpload, cancel: cancelUpload } = useMediaUpload();
+  const { items, add: addUploads, remove: removeUpload, moveUp, retry: retryUpload } = useMediaUploads();
+  const cover = items[0] ?? null;
+  const isCarousel = items.length > 1;
+  const isPhotos = !!cover && cover.file.type.startsWith("image/");
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set(accounts.map((a) => a.id)));
   const [caption, setCaption] = useState("");
@@ -77,6 +153,8 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
     disableStitch: false,
     brandOrganic: false,
     brandedContent: false,
+    isAigc: false,
+    autoAddMusic: true,
   });
   const [commercial, setCommercial] = useState(false);
   const [creatorInfo, setCreatorInfo] = useState<Record<string, TikTokCreatorInfo | { error: string }>>({});
@@ -115,48 +193,69 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
 
   // Warn before leaving with unsaved work.
   useEffect(() => {
-    if (!file || submitted) return;
+    if (!items.length || submitted) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [file, submitted]);
+  }, [items.length, submitted]);
 
-  useEffect(() => () => void (previewUrl && URL.revokeObjectURL(previewUrl)), [previewUrl]);
-
-  async function pickFile(f: File | undefined) {
-    if (!f) return;
+  /** A post is one video, or 1–35 photos (a carousel when there's more than one). */
+  async function pickFiles(list: FileList | null | undefined) {
+    const files = [...(list ?? [])];
+    if (fileInput.current) fileInput.current.value = "";
+    if (!files.length) return;
     setFileError(null);
-    if (!ACCEPT.split(",").includes(f.type)) {
-      setFileError("Use an MP4 or MOV video, or a JPEG, PNG or WebP image.");
+    if (files.some((f) => !ACCEPT.split(",").includes(f.type))) {
+      setFileError("Use an MP4 or MOV video, or JPEG, PNG or WebP photos.");
       return;
     }
-    const url = URL.createObjectURL(f);
-    try {
-      const m = await readMediaMeta(f, url);
-      setFile(f);
-      setPreviewUrl(url);
-      setMeta(m);
-      // Keep the Instagram format valid for the media type.
-      const isImage = f.type.startsWith("image/");
-      setIg((o) => (isImage && o.format === "reel" ? { ...o, format: "post" } : !isImage && o.format === "post" ? { ...o, format: "reel" } : o));
-      startUpload(f, m);
-    } catch (err) {
-      URL.revokeObjectURL(url);
-      setFileError(err instanceof Error ? err.message : "Couldn't read this file");
+    const addingVideo = files.some((f) => f.type.startsWith("video/"));
+    if (addingVideo && (files.length > 1 || items.length > 0)) {
+      setFileError(`A post is one video, or up to ${MAX_CAROUSEL_ITEMS} photos.`);
+      return;
     }
+    if (cover && !isPhotos) {
+      setFileError("Remove the video to post photos instead.");
+      return;
+    }
+    if (items.length + files.length > MAX_CAROUSEL_ITEMS) {
+      setFileError(`A post can have up to ${MAX_CAROUSEL_ITEMS} photos.`);
+      return;
+    }
+
+    const added: Omit<UploadItem, "state">[] = [];
+    for (const file of files) {
+      const previewUrl = URL.createObjectURL(file);
+      try {
+        added.push({ key: crypto.randomUUID(), file, previewUrl, meta: await readMediaMeta(file, previewUrl) });
+      } catch (err) {
+        for (const url of [previewUrl, ...added.map((a) => a.previewUrl)]) URL.revokeObjectURL(url);
+        setFileError(err instanceof Error ? err.message : `Couldn't read ${file.name}`);
+        return;
+      }
+    }
+    // Keep the Instagram format valid for the media: carousels are posts, videos default to reels.
+    const count = items.length + added.length;
+    setIg((o) =>
+      addingVideo
+        ? o.format === "post" ? { ...o, format: "reel" } : o
+        : o.format === "reel" || (count > 1 && o.format === "story") ? { ...o, format: "post" } : o,
+    );
+    addUploads(added);
   }
 
-  function clearFile() {
-    cancelUpload();
-    setFile(null);
-    setMeta(null);
-    setPreviewUrl(null);
-    if (fileInput.current) fileInput.current.value = "";
-  }
-
-  const mediaInfo: MediaInfo | null = file && meta
-    ? { kind: file.type.startsWith("image/") ? "image" : "video", mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS }
-    : null;
+  const mediaInfos: MediaInfo[] = items.map(({ file, meta }) => ({
+    kind: file.type.startsWith("image/") ? "image" : "video",
+    mime: file.type,
+    sizeBytes: file.size,
+    width: meta.width,
+    height: meta.height,
+    durationS: meta.durationS,
+  }));
+  const mediaInfo = mediaInfos[0] ?? null;
+  const meta = cover?.meta ?? null;
+  const uploaded = items.length > 0 && items.every((i) => i.state.status === "done");
+  const uploading = items.some((i) => i.state.status === "uploading");
 
   const optionsFor = (platform: Platform): TargetOptions =>
     platform === "youtube"
@@ -167,8 +266,8 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
 
   const captionFor = (platform: Platform) => overrides[platform] ?? caption;
 
-  const issues: ValidationIssue[] = mediaInfo
-    ? platforms.flatMap((p) => validateTarget(mediaInfo, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
+  const issues: ValidationIssue[] = mediaInfos.length
+    ? platforms.flatMap((p) => validateMedia(mediaInfos, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
     : [];
 
   const extraBlockers: string[] = [];
@@ -180,17 +279,18 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
     if (info && "error" in info) extraBlockers.push(`TikTok: ${info.error}`);
   }
 
-  const canSubmit = upload.status === "done" && selectedAccounts.length > 0 && issues.length === 0 && extraBlockers.length === 0 && !submitting;
+  const canSubmit = uploaded && selectedAccounts.length > 0 && issues.length === 0 && extraBlockers.length === 0 && !submitting;
 
   function submit() {
-    if (upload.status !== "done") return;
+    const assetIds = items.flatMap((i) => (i.state.status === "done" ? [i.state.assetId] : []));
+    if (!assetIds.length || assetIds.length !== items.length) return;
     setSubmitError(null);
     if (when === "later" && isTooSoon(scheduleAt)) {
       setSubmitError("Pick a time at least a minute from now.");
       return;
     }
     const input: CreatePostInput = {
-      mediaAssetId: upload.assetId,
+      ...(assetIds.length > 1 ? { mediaAssetIds: assetIds } : { mediaAssetId: assetIds[0] }),
       caption,
       scheduledFor: when === "later" ? new Date(scheduleAt).toISOString() : null,
       targets: selectedAccounts.map((a) => ({
@@ -220,8 +320,18 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="min-w-0 space-y-6">
         {/* 1. Media */}
-        <Section step={1} title="Media" description="Vertical 9:16 video works best on every platform.">
-          {!file ? (
+        <Section step={1} title="Media" description="One vertical 9:16 video, or several photos for a swipeable carousel (TikTok and Instagram).">
+          <input
+            ref={fileInput}
+            id={`${ids}-file`}
+            type="file"
+            accept={ACCEPT}
+            multiple
+            className="sr-only"
+            aria-label="Choose a video or photos"
+            onChange={(e) => pickFiles(e.target.files)}
+          />
+          {!items.length ? (
             <div
               onDragOver={(e) => {
                 e.preventDefault();
@@ -231,7 +341,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);
-                pickFile(e.dataTransfer.files[0]);
+                pickFiles(e.dataTransfer.files);
               }}
               className={cn(
                 "flex flex-col items-center rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-200",
@@ -241,59 +351,32 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
               <span className="grid size-14 animate-float place-items-center rounded-2xl bg-background text-primary shadow-pop">
                 <UploadCloud className="size-6" aria-hidden />
               </span>
-              <p className="mt-4 font-semibold">Drag a video or photo here</p>
-              <p className="mt-1 text-sm text-muted-foreground">MP4, MOV, JPEG, PNG or WebP</p>
+              <p className="mt-4 font-semibold">Drag a video or photos here</p>
+              <p className="mt-1 text-sm text-muted-foreground">MP4, MOV, JPEG, PNG or WebP · up to {MAX_CAROUSEL_ITEMS} photos</p>
               <Button type="button" variant="secondary" className="mt-5" onClick={() => fileInput.current?.click()}>
-                Choose file
+                Choose files
               </Button>
-              <input
-                ref={fileInput}
-                id={`${ids}-file`}
-                type="file"
-                accept={ACCEPT}
-                className="sr-only"
-                aria-label="Choose a video or photo"
-                onChange={(e) => pickFile(e.target.files?.[0])}
-              />
             </div>
           ) : (
-            <div className="flex items-center gap-4 rounded-2xl border border-border bg-surface p-4">
-              <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-background text-muted-foreground shadow-sm">
-                <Film className="size-5" aria-hidden />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{file.name}</p>
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  {formatBytes(file.size)}
-                  {meta?.width && meta.height ? ` · ${meta.width}×${meta.height}` : ""}
-                  {meta?.durationS ? ` · ${formatDuration(meta.durationS)}` : ""}
-                  {mediaInfo && !vertical && " · landscape"}
-                </p>
-                <div className="mt-2" aria-live="polite">
-                  {upload.status === "uploading" && (
-                    <div className="flex items-center gap-3">
-                      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(upload.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
-                        <div className="stripes h-full animate-stripes rounded-full bg-accent transition-[width] duration-300" style={{ width: `${upload.progress * 100}%` }} />
-                      </div>
-                      <span className="text-xs font-semibold tabular-nums text-muted-foreground">{Math.round(upload.progress * 100)}%</span>
-                    </div>
-                  )}
-                  {upload.status === "done" && (
-                    <p className="flex items-center gap-1.5 text-xs font-semibold text-success"><CheckCircle2 className="size-3.5" aria-hidden />Uploaded</p>
-                  )}
-                  {upload.status === "error" && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-destructive"><AlertCircle className="size-3.5" aria-hidden />{upload.error}</p>
-                      <Button size="sm" variant="secondary" onClick={() => meta && startUpload(file, meta)}>
-                        <RefreshCw aria-hidden /> Retry
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <button type="button" onClick={clearFile} aria-label="Remove file" className="grid size-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
-                <X className="size-5" aria-hidden />
-              </button>
+            <div className="space-y-2">
+              <ol className="space-y-2" aria-label={isCarousel ? "Carousel photos in order" : "Media"}>
+                {items.map((item, index) => (
+                  <MediaRow
+                    key={item.key}
+                    item={item}
+                    position={isCarousel ? index + 1 : null}
+                    landscape={!isVertical(mediaInfos[index])}
+                    onRemove={() => removeUpload(item.key)}
+                    onMoveUp={index > 0 ? () => moveUp(item.key) : undefined}
+                    onRetry={() => retryUpload(item)}
+                  />
+                ))}
+              </ol>
+              {isPhotos && items.length < MAX_CAROUSEL_ITEMS && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => fileInput.current?.click()}>
+                  <ImagePlus aria-hidden /> Add photos
+                </Button>
+              )}
             </div>
           )}
           {fileError && <p role="alert" className="mt-3 text-sm text-destructive">{fileError}</p>}
@@ -427,6 +510,13 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                     </Field>
                   </div>
                   <Switch id={`${ids}-yt-kids`} checked={!!yt.madeForKids} onChange={(v) => setYt({ ...yt, madeForKids: v })} label="Made for kids" description="Required by YouTube if this content is directed at children." />
+                  <Switch
+                    id={`${ids}-yt-synthetic`}
+                    checked={!!yt.containsSyntheticMedia}
+                    onChange={(v) => setYt({ ...yt, containsSyntheticMedia: v })}
+                    label="Altered or synthetic content"
+                    description="Turn on if realistic people, places or events in it were made or changed with AI."
+                  />
                   {issuesFor("youtube", "media").map((i) => <p key={i.message} role="alert" className="text-sm text-destructive">{i.message}</p>)}
                 </div>
               )}
@@ -438,7 +528,9 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                     <legend className="mb-2 text-sm font-medium">Post as</legend>
                     <div className="grid grid-cols-3 gap-2">
                       {(["reel", "post", "story"] as const).map((f) => {
-                        const disabled = mediaInfo ? (f === "reel" && mediaInfo.kind !== "video") || (f === "post" && mediaInfo.kind !== "image") : false;
+                        const disabled = mediaInfo
+                          ? (f === "reel" && mediaInfo.kind !== "video") || (f === "post" && mediaInfo.kind !== "image") || (f === "story" && isCarousel)
+                          : false;
                         return (
                           <label
                             key={f}
@@ -470,7 +562,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                       Posting as <span className="font-semibold text-foreground">{tiktokInfos.map((i) => i.creatorNickname || `@${i.creatorUsername}`).join(", ")}</span>
                     </p>
                   )}
-                  <Field id={`${ids}-tt-privacy`} label="Who can view this video" required hint="Until TikTok audits your app, only “Only me” will succeed.">
+                  <Field id={`${ids}-tt-privacy`} label={isPhotos ? "Who can view this post" : "Who can view this video"} required hint="Until TikTok audits your app, only “Only me” will succeed.">
                     <Select id={`${ids}-tt-privacy`} value={tt.privacyLevel} onChange={(e) => setTt({ ...tt, privacyLevel: e.target.value })} disabled={!tiktokPrivacyOptions.length}>
                       <option value="" disabled>Choose…</option>
                       {tiktokPrivacyOptions.map((o) => (
@@ -484,6 +576,10 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
                     <Switch id={`${ids}-tt-comment`} checked={!tt.disableComment && !tiktokLocked.comment} disabled={tiktokLocked.comment} onChange={(v) => setTt({ ...tt, disableComment: !v })} label="Allow comments" />
                     <Switch id={`${ids}-tt-duet`} checked={!tt.disableDuet && !tiktokLocked.duet} disabled={tiktokLocked.duet} onChange={(v) => setTt({ ...tt, disableDuet: !v })} label="Allow Duet" />
                     <Switch id={`${ids}-tt-stitch`} checked={!tt.disableStitch && !tiktokLocked.stitch} disabled={tiktokLocked.stitch} onChange={(v) => setTt({ ...tt, disableStitch: !v })} label="Allow Stitch" />
+                    {isPhotos && (
+                      <Switch id={`${ids}-tt-music`} checked={tt.autoAddMusic ?? true} onChange={(v) => setTt({ ...tt, autoAddMusic: v })} label="Add recommended music" description="TikTok picks a sound for photo posts. You can change it in the app." />
+                    )}
+                    <Switch id={`${ids}-tt-aigc`} checked={!!tt.isAigc} onChange={(v) => setTt({ ...tt, isAigc: v })} label="AI-generated content" description="Adds TikTok's AI label. Required for realistic AI-made content." />
                   </div>
                   <div className="rounded-xl border border-border px-4 py-1">
                     <Switch id={`${ids}-tt-commercial`} checked={commercial} onChange={setCommercial} label="Disclose commercial content" description="Turn on if this promotes yourself, a brand, product or service." />
@@ -523,19 +619,22 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
       <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
         <div className="mx-auto w-full max-w-[13rem] rounded-[2.25rem] sm:max-w-[17rem] border-[6px] border-foreground bg-foreground shadow-lg">
           <div className={cn("relative overflow-hidden rounded-[1.75rem] bg-muted-foreground", vertical ? "aspect-[9/16]" : "aspect-[9/16] flex items-center")}>
-            {previewUrl && file?.type.startsWith("video/") && (
-              <video src={previewUrl} controls playsInline muted loop className="size-full object-contain" aria-label="Preview" />
+            {cover && !isPhotos && (
+              <video src={cover.previewUrl} controls playsInline muted loop className="size-full object-contain" aria-label="Preview" />
             )}
-            {previewUrl && file?.type.startsWith("image/") && (
+            {cover && isPhotos && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewUrl} alt="Preview" className="size-full object-contain" />
+              <img src={cover.previewUrl} alt="Preview of the cover photo" className="size-full object-contain" />
             )}
-            {!previewUrl && (
+            {isCarousel && (
+              <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white tabular-nums">1/{items.length}</span>
+            )}
+            {!cover && (
               <div className="grid size-full place-items-center text-center text-sm font-semibold text-brand-tea">
                 <span className="px-6">Your preview shows up here</span>
               </div>
             )}
-            {previewUrl && caption && (
+            {cover && caption && (
               <p className="pointer-events-none absolute inset-x-0 bottom-0 line-clamp-3 bg-gradient-to-t from-black/70 to-transparent px-4 pb-14 pt-10 text-[13px] leading-snug text-white">
                 {captionFor(captionTab === "all" ? platforms[0] ?? "instagram" : captionTab)}
               </p>
@@ -569,7 +668,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
               </Field>
             )}
 
-            {(issues.length > 0 || extraBlockers.length > 0) && file && (
+            {(issues.length > 0 || extraBlockers.length > 0) && items.length > 0 && (
               <ul className="space-y-1.5 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning" aria-live="polite">
                 {[...issues.map((i) => `${PLATFORM_META[i.platform].label}: ${i.message}`), ...extraBlockers].map((m) => (
                   <li key={m} className="flex gap-2"><Info className="mt-0.5 size-4 shrink-0" aria-hidden />{m}</li>
@@ -582,8 +681,8 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
               {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
               {when === "now" ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}` : "Schedule post"}
             </Button>
-            {upload.status === "uploading" && <p className="text-center text-xs text-muted-foreground">You can publish once the upload finishes.</p>}
-            {!file && <p className="text-center text-xs text-muted-foreground">Add a video or photo to get started.</p>}
+            {uploading && <p className="text-center text-xs text-muted-foreground">You can publish once the upload finishes.</p>}
+            {!items.length && <p className="text-center text-xs text-muted-foreground">Add a video or photos to get started.</p>}
           </CardBody>
         </Card>
       </aside>

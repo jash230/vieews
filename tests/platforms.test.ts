@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { instagram } from "@/lib/platforms/instagram";
-import { chunkRange, tiktok, tiktokChunkPlan } from "@/lib/platforms/tiktok";
+import { chunkRange, photoPostBody, tiktok, tiktokChunkPlan } from "@/lib/platforms/tiktok";
 import { nextOffset, youtube, YT_CHUNK_BYTES } from "@/lib/platforms/youtube";
 import { fakeCtx, json, mockFetch, rangeHandler } from "./helpers";
 
@@ -41,8 +41,20 @@ describe("YouTube", () => {
     const init = JSON.parse(String(calls[0].init.body));
     expect(init.snippet.title).toBe("Hello");
     expect(init.status.privacyStatus).toBe("unlisted");
+    expect(init.status).not.toHaveProperty("containsSyntheticMedia");
     const puts = calls.filter((c) => c.url.includes("session") && c.init.method === "PUT").map((c) => new Headers(c.init.headers).get("content-range"));
     expect(puts).toEqual([`bytes */${size}`, `bytes 0-${YT_CHUNK_BYTES - 1}/${size}`, `bytes ${YT_CHUNK_BYTES}-${2 * YT_CHUNK_BYTES - 1}/${size}`, `bytes ${2 * YT_CHUNK_BYTES}-${size - 1}/${size}`]);
+  });
+
+  it("sends the AI disclosure when set", async () => {
+    const calls = mockFetch([
+      [/uploadType=resumable/, () => new Response(null, { headers: { location: "https://upload.example/s" } })],
+      [/storage\.example/, rangeHandler(10)],
+      [/upload\.example\/s/, (_u, init) => (new Headers(init.headers).get("content-range")!.startsWith("bytes */") ? new Response(null, { status: 308 }) : json({ id: "v" }))],
+    ]);
+    const { ctx } = fakeCtx({ media: { size_bytes: 10 }, options: { platform: "youtube", youtube: { title: "t", privacy: "public", containsSyntheticMedia: true } } });
+    await youtube.publish(ctx);
+    expect(JSON.parse(String(calls[0].init.body)).status.containsSyntheticMedia).toBe(true);
   });
 
   it("resumes from where YouTube says it is", async () => {
@@ -92,6 +104,32 @@ describe("Instagram", () => {
     expect(body.caption).toBeUndefined();
   });
 
+  it("publishes a carousel: one child container per photo, then the parent", async () => {
+    let n = 0;
+    const calls = mockFetch([
+      [(u, i) => u.endsWith("/17841/media") && i.method === "POST", (_u, i) => json({ id: new URLSearchParams(String(i.body)).get("media_type") === "CAROUSEL" ? "parent" : `child${++n}` })],
+      [/parent\?/, () => json({ status_code: "FINISHED" })],
+      [/media_publish/, () => json({ id: "post1" })],
+      [/post1\?/, () => json({ permalink: "https://www.instagram.com/p/xyz/" })],
+    ]);
+    const { ctx } = fakeCtx({
+      media: { kind: "image", mime: "image/jpeg", storage_path: "u/1.jpg" },
+      more: [{ kind: "image", mime: "image/jpeg" }, { kind: "image", mime: "image/jpeg" }],
+      options: { platform: "instagram", instagram: { format: "post" } },
+      caption: "swipe →",
+    });
+    const result = await instagram.publish(ctx);
+
+    expect(result.remoteUrl).toBe("https://www.instagram.com/p/xyz/");
+    const creates = calls.filter((c) => c.url.endsWith("/media")).map((c) => Object.fromEntries(new URLSearchParams(String(c.init.body))));
+    expect(creates.slice(0, 3).map((b) => [b.image_url, b.is_carousel_item])).toEqual([
+      ["https://storage.example/u/1.jpg", "true"],
+      ["https://storage.example/u/m2.jpg", "true"],
+      ["https://storage.example/u/m3.jpg", "true"],
+    ]);
+    expect(creates[3]).toMatchObject({ media_type: "CAROUSEL", children: "child1,child2,child3", caption: "swipe →" });
+  });
+
   it("fails without retry when processing errors", async () => {
     mockFetch([
       [(u, i) => u.endsWith("/media") && i.method === "POST", () => json({ id: "c" })],
@@ -135,6 +173,39 @@ describe("TikTok", () => {
     expect(init.source_info).toEqual({ source: "FILE_UPLOAD", video_size: size, chunk_size: 10 * MB, total_chunk_count: 1 });
     const put = calls.find((c) => c.url.includes("tt-upload"))!;
     expect(new Headers(put.init.headers).get("content-range")).toBe(`bytes 0-${size - 1}/${size}`);
+  });
+
+  it("posts photos from the app's own domain with music and the AI label", async () => {
+    const calls = mockFetch([
+      [/creator_info/, () => ok(creator)],
+      [/content\/init/, () => ok({ publish_id: "ph1" })],
+      [/status\/fetch/, () => ok({ status: "PUBLISH_COMPLETE", publicaly_available_post_id: [42] })],
+    ]);
+    const caption = "POV: you finally found the app\nfull story below #fyp";
+    const { ctx } = fakeCtx({
+      media: { kind: "image", mime: "image/jpeg" },
+      more: [{ kind: "image", mime: "image/jpeg" }],
+      options: { platform: "tiktok", tiktok: { ...opts, brandOrganic: true, isAigc: true } },
+      caption,
+    });
+    const result = await tiktok.publish(ctx);
+
+    expect(result).toEqual({ remoteId: "42", remoteUrl: "https://www.tiktok.com/@zaza/photo/42" });
+    const body = JSON.parse(String(calls.find((c) => c.url.includes("content/init"))!.init.body));
+    expect(body).toMatchObject({
+      media_type: "PHOTO",
+      post_mode: "DIRECT_POST",
+      is_aigc: true,
+      post_info: { title: "POV: you finally found the app", description: caption, privacy_level: "SELF_ONLY", auto_add_music: true, brand_organic_toggle: true, disable_comment: true },
+      source_info: { source: "PULL_FROM_URL", photo_cover_index: 0, photo_images: ["https://app.example/media/tt/m.jpg", "https://app.example/media/tt/m2.jpg"] },
+    });
+  });
+
+  it("caps photo titles at 90 characters", () => {
+    const info = { privacyLevelOptions: ["SELF_ONLY"], commentDisabled: false } as Parameters<typeof photoPostBody>[1];
+    const body = photoPostBody({ ...opts, autoAddMusic: false }, info, "x".repeat(200), ["u"]);
+    expect(body.post_info.title).toHaveLength(90);
+    expect(body.post_info.auto_add_music).toBe(false);
   });
 
   it("refuses a privacy level the account no longer offers", async () => {

@@ -46,6 +46,8 @@ export interface MediaAssetRow {
   duration_s: number | null;
   thumbnail_path: string | null;
   status: "pending" | "ready";
+  /** Set once the stored file was deleted to free space; the row and thumbnail stay. */
+  purged_at: string | null;
   created_at: string;
 }
 
@@ -55,6 +57,8 @@ export interface YouTubeOptions {
   tags?: string[];
   privacy: "public" | "unlisted" | "private";
   madeForKids?: boolean;
+  /** YouTube's "altered or synthetic content" disclosure. */
+  containsSyntheticMedia?: boolean;
 }
 
 export interface InstagramOptions {
@@ -72,6 +76,8 @@ export interface TikTokOptions {
   /** Paid partnership with a third party. */
   brandedContent: boolean;
   isAigc?: boolean;
+  /** Photo posts only: let TikTok add recommended music. */
+  autoAddMusic?: boolean;
 }
 
 export type TargetOptions =
@@ -87,9 +93,18 @@ export interface PostRow {
   scheduled_for: string | null;
   status: PostStatus;
   source: "web" | "mcp";
+  /** Free-form grouping, e.g. "ad-studio:myapp". */
+  campaign: string | null;
+  meta: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   published_at: string | null;
+}
+
+export interface PostMediaRow {
+  post_id: string;
+  media_asset_id: string;
+  position: number;
 }
 
 export interface PostTargetRow {

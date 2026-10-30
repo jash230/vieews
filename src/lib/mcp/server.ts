@@ -30,6 +30,9 @@ function summarizePost(p: PostWithTargets) {
     scheduled_for: p.scheduled_for,
     created_at: p.created_at,
     source: p.source,
+    campaign: p.campaign,
+    meta: p.meta,
+    media: { kind: p.media?.kind ?? null, items: p.items.length },
     targets: p.targets.map((t) => ({
       id: t.id,
       platform: t.platform,
@@ -145,10 +148,13 @@ export function registerTools(server: McpServer) {
     {
       title: "Create post",
       description: [
-        "Publishes (or schedules, with scheduledFor as an ISO time with offset) one media asset to one or more connected accounts.",
-        "options per target: youtube {title, description?, tags?, privacy: public|unlisted|private};",
-        "instagram {format: reel|post|story, shareToFeed?} (post = single JPEG photo);",
-        "tiktok {privacyLevel (from get_platform_requirements), disableComment, disableDuet, disableStitch, brandOrganic, brandedContent}.",
+        "Publishes (or schedules, with scheduledFor as an ISO time with offset) media to one or more connected accounts.",
+        "Pass mediaAssetId for one video or photo, or mediaAssetIds (in order) for a photo carousel:",
+        "a TikTok photo post (1–35 JPEG/WebP) or an Instagram carousel (2–10 JPEGs, format post). YouTube needs a video.",
+        "options per target: youtube {title, description?, tags?, privacy: public|unlisted|private, containsSyntheticMedia?};",
+        "instagram {format: reel|post|story, shareToFeed?} (post = JPEG photo or carousel);",
+        "tiktok {privacyLevel (from get_platform_requirements), disableComment, disableDuet, disableStitch, brandOrganic, brandedContent, isAigc?, autoAddMusic? (photo posts)}.",
+        "Optional campaign (string) and meta (JSON) are stored with the post so you can find and learn from past posts with list_posts.",
         "Publishing runs in the background; poll get_post for per-platform results.",
       ].join(" "),
       inputSchema: createPostSchema,
@@ -177,14 +183,27 @@ export function registerTools(server: McpServer) {
     "list_posts",
     {
       title: "List posts",
-      description: "Lists recent posts, newest first. Filter by status to find scheduled or failed ones.",
+      description:
+        "Lists posts newest first, with their campaign and meta. Filter by status, campaign, or creation time (since, ISO). Page back by passing the oldest created_at you got as before.",
       inputSchema: z.object({
         status: z.array(z.enum(["scheduled", "publishing", "published", "partial", "failed", "canceled"])).optional(),
+        campaign: z.string().optional(),
+        since: z.string().datetime({ offset: true }).optional(),
+        before: z.string().datetime({ offset: true }).optional(),
         limit: z.number().int().min(1).max(100).default(20),
       }),
     },
-    tool(async ({ status, limit }: { status?: ("scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled")[]; limit?: number }, userId) =>
-      (await listPosts(userId, { status, limit })).map(summarizePost),
+    tool(
+      async (
+        args: {
+          status?: ("scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled")[];
+          campaign?: string;
+          since?: string;
+          before?: string;
+          limit?: number;
+        },
+        userId,
+      ) => (await listPosts(userId, args)).map(summarizePost),
     ),
   );
 

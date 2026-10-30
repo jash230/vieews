@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { finishUploadAction, startUploadAction } from "../actions";
 
 export interface MediaMeta {
@@ -83,45 +83,115 @@ function putToSignedUrl(url: string, body: Blob, onProgress: (fraction: number) 
   });
 }
 
-export function useMediaUpload() {
-  const [state, setState] = useState<UploadState>({ status: "idle" });
-  const current = useRef<XMLHttpRequest | null>(null);
+/** Creates the asset, uploads the file (and optional thumbnail), and marks it ready. Returns the asset id. */
+async function uploadOne(file: File, meta: MediaMeta, onProgress: (fraction: number) => void, register: (xhr: XMLHttpRequest) => void) {
+  // The server creates the asset and hands back one-time upload links.
+  const started = await startUploadAction({ mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS });
+  if (!started.ok) throw new Error(started.error);
+  const { assetId, uploadUrl, thumbnailPath, thumbnailUploadUrl } = started.data;
 
-  const cancel = useCallback(() => {
-    current.current?.abort();
-    current.current = null;
-    setState({ status: "idle" });
+  await putToSignedUrl(uploadUrl, file, onProgress, register);
+
+  let thumbPath: string | null = null;
+  if (meta.thumbnail) {
+    // Thumbnail is optional; a failure here shouldn't block the post.
+    thumbPath = await putToSignedUrl(thumbnailUploadUrl, meta.thumbnail, () => {}, register).then(() => thumbnailPath, () => null);
+  }
+
+  const done = await finishUploadAction(assetId, thumbPath);
+  if (!done.ok) throw new Error(done.error);
+  return assetId;
+}
+
+export interface UploadItem {
+  key: string;
+  file: File;
+  previewUrl: string;
+  meta: MediaMeta;
+  state: UploadState;
+}
+
+/** Uploads several files at once (a video, or the photos of a carousel), keeping their order. */
+export function useMediaUploads() {
+  const [items, setItems] = useState<UploadItem[]>([]);
+  const xhrs = useRef(new Map<string, XMLHttpRequest>());
+  const previewUrls = useRef(new Set<string>());
+
+  // Stop uploads and free previews when the composer goes away.
+  useEffect(() => {
+    const open = xhrs.current;
+    const urls = previewUrls.current;
+    return () => {
+      for (const xhr of open.values()) xhr.abort();
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
   }, []);
 
-  const upload = useCallback(async (file: File, meta: MediaMeta) => {
-    current.current?.abort();
-    setState({ status: "uploading", progress: 0 });
+  const setState = useCallback((key: string, state: UploadState) => {
+    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, state } : i)));
+  }, []);
 
-    // The server creates the asset and hands back one-time upload links.
-    const started = await startUploadAction({ mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS });
-    if (!started.ok) return setState({ status: "error", error: started.error });
-    const { assetId, uploadUrl, thumbnailPath, thumbnailUploadUrl } = started.data;
-    const register = (xhr: XMLHttpRequest) => (current.current = xhr);
-
-    try {
-      await putToSignedUrl(uploadUrl, file, (progress) => setState({ status: "uploading", progress }), register);
-
-      let thumbPath: string | null = null;
-      if (meta.thumbnail) {
-        // Thumbnail is optional; a failure here shouldn't block the post.
-        thumbPath = await putToSignedUrl(thumbnailUploadUrl, meta.thumbnail, () => {}, register).then(() => thumbnailPath, () => null);
+  const start = useCallback(
+    async (item: Pick<UploadItem, "key" | "file" | "meta">) => {
+      setState(item.key, { status: "uploading", progress: 0 });
+      try {
+        const assetId = await uploadOne(
+          item.file,
+          item.meta,
+          (progress) => setState(item.key, { status: "uploading", progress }),
+          (xhr) => xhrs.current.set(item.key, xhr),
+        );
+        setState(item.key, { status: "done", assetId });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setState(item.key, { status: "error", error: err instanceof Error ? err.message : "Upload failed" });
+      } finally {
+        xhrs.current.delete(item.key);
       }
+    },
+    [setState],
+  );
 
-      const done = await finishUploadAction(assetId, thumbPath);
-      if (!done.ok) throw new Error(done.error);
-      setState({ status: "done", assetId });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setState({ status: "error", error: err instanceof Error ? err.message : "Upload failed" });
-    } finally {
-      current.current = null;
-    }
+  const add = useCallback(
+    (added: Omit<UploadItem, "state">[]) => {
+      for (const i of added) previewUrls.current.add(i.previewUrl);
+      setItems((prev) => [...prev, ...added.map((i) => ({ ...i, state: { status: "uploading", progress: 0 } as const }))]);
+      for (const item of added) void start(item);
+    },
+    [start],
+  );
+
+  const remove = useCallback((key: string) => {
+    xhrs.current.get(key)?.abort();
+    setItems((prev) => {
+      const gone = prev.find((i) => i.key === key);
+      if (gone) {
+        URL.revokeObjectURL(gone.previewUrl);
+        previewUrls.current.delete(gone.previewUrl);
+      }
+      return prev.filter((i) => i.key !== key);
+    });
   }, []);
 
-  return { state, upload, cancel };
+  const clear = useCallback(() => {
+    for (const xhr of xhrs.current.values()) xhr.abort();
+    for (const url of previewUrls.current) URL.revokeObjectURL(url);
+    previewUrls.current.clear();
+    setItems([]);
+  }, []);
+
+  /** Moves an item one place earlier (the first photo is the cover). */
+  const moveUp = useCallback((key: string) => {
+    setItems((prev) => {
+      const at = prev.findIndex((i) => i.key === key);
+      if (at <= 0) return prev;
+      const next = [...prev];
+      [next[at - 1], next[at]] = [next[at], next[at - 1]];
+      return next;
+    });
+  }, []);
+
+  const retry = useCallback((item: UploadItem) => void start(item), [start]);
+
+  return { items, add, remove, clear, moveUp, retry };
 }

@@ -82,6 +82,22 @@ export const instagram: PlatformAdapter = {
 
     const containerId = await ctx.run("instagram-container", async () => {
       const params: Record<string, string> = { access_token: await ctx.accessToken() };
+      if (ctx.items.length > 1) {
+        // Carousel: one child container per photo, then a parent that lists them in order.
+        const children: string[] = [];
+        for (const url of await ctx.itemUrls()) {
+          const res = await fetch(`${IG_GRAPH}/${igUserId}/media`, {
+            method: "POST",
+            body: form({ image_url: url, is_carousel_item: "true", access_token: params.access_token }),
+          });
+          children.push((await igJson(res, `Instagram carousel item ${children.length + 1}`)).id as string);
+        }
+        const res = await fetch(`${IG_GRAPH}/${igUserId}/media`, {
+          method: "POST",
+          body: form({ ...params, media_type: "CAROUSEL", children: children.join(","), caption: ctx.caption }),
+        });
+        return (await igJson(res, "Instagram carousel container")).id as string;
+      }
       const url = await ctx.mediaUrl();
       if (format === "story") {
         params.media_type = "STORIES";

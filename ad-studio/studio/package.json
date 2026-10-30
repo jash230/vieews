@@ -1,0 +1,45 @@
+{
+  "name": "ad-studio",
+  "private": true,
+  "type": "module",
+  "description": "Makes short-form app ads (slideshows and videos) for the make-ad skill, then hands them to Vieews.",
+  "scripts": {
+    "kit": "tsx src/cli/kit.ts",
+    "pick": "tsx src/cli/pick.ts",
+    "image": "tsx src/cli/image.ts",
+    "voice": "tsx src/cli/voice.ts",
+    "render": "tsx src/cli/render.ts",
+    "publish-ad": "tsx src/cli/publish.ts",
+    "studio": "remotion studio remotion/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/tiktok-sans": "^5.3.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@remotion/bundler": "4.0.539",
+    "@remotion/cli": "4.0.539",
+    "@remotion/fonts": "4.0.539",
+    "@remotion/layout-utils": "4.0.539",
+    "@remotion/media": "4.0.539",
+    "@remotion/renderer": "4.0.539",
+    "@remotion/transitions": "4.0.539",
+    "kokoro-js": "^1.2.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "4.0.539",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

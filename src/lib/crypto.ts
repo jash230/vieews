@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const VERSION = "v1";
 
@@ -35,6 +35,32 @@ export function sha256Hex(value: string): string {
 
 export function randomToken(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
+}
+
+function hmacKey(secret: string, purpose: string): Buffer {
+  // Separate key per purpose so the encryption key is never used directly for signing.
+  return createHmac("sha256", keyFrom(secret)).update(purpose).digest();
+}
+
+/** Compact signed token: <payload>.<signature>, both base64url. */
+export function signToken(payload: Record<string, unknown>, secret: string, purpose: string): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = createHmac("sha256", hmacKey(secret, purpose)).update(body).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+/** Returns the payload when the signature matches, otherwise null. */
+export function verifyToken<T>(token: string, secret: string, purpose: string): T | null {
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = createHmac("sha256", hmacKey(secret, purpose)).update(body).digest();
+  const given = Buffer.from(sig, "base64url");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  try {
+    return JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as T;
+  } catch {
+    return null;
+  }
 }
 
 /** PKCE S256 challenge for a verifier. */
