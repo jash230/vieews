@@ -4,7 +4,7 @@ import { Unlink } from "lucide-react";
 import { useTransition } from "react";
 import { disconnectAccountAction } from "../actions";
 
-export function DisconnectButton({ accountId, name }: { accountId: string; name: string }) {
+export function DisconnectButton({ accountId, name, projects = [] }: { accountId: string; name: string; projects?: string[] }) {
   const [pending, start] = useTransition();
   return (
     <button
@@ -13,7 +13,8 @@ export function DisconnectButton({ accountId, name }: { accountId: string; name:
       title="Disconnect"
       disabled={pending}
       onClick={() => {
-        if (!confirm(`Disconnect ${name}? Scheduled posts to this account will be removed.`)) return;
+        const lose = projects.length ? ` ${projects.join(", ")} will stop posting to it.` : "";
+        if (!confirm(`Disconnect ${name}? Scheduled posts to this account will be removed.${lose}`)) return;
         start(async () => {
           const res = await disconnectAccountAction(accountId);
           if (!res.ok) alert(res.error);

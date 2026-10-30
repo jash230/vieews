@@ -88,6 +88,7 @@ export type TargetOptions =
 export interface PostRow {
   id: string;
   user_id: string;
+  project_id: string | null;
   caption: string;
   media_asset_id: string;
   scheduled_for: string | null;

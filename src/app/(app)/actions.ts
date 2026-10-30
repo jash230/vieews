@@ -4,10 +4,24 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { disconnectAccount, getAccount, getValidAccessToken } from "@/lib/accounts/service";
 import { createMediaAsset, createSignedUpload, createSignedUploadUrl, finalizeMediaAsset, thumbnailPathFor, type NewMediaInput } from "@/lib/media/service";
+import { approveProposal, declineProposal } from "@/lib/copilot/proposals";
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import type { CreatePostInput } from "@/lib/posts/schema";
 import { cancelPost, createPost, PostValidationError, retryTarget } from "@/lib/posts/service";
+import { createProjectFromLink } from "@/lib/projects/create-from-link";
+import { setCurrentProjectCookie } from "@/lib/projects/current";
+import {
+  assertProjectOwner,
+  createProject,
+  defaultProject,
+  deleteProject,
+  setProjectAccounts,
+  setProjectMedia,
+  updateProject,
+  type ProjectInput,
+  type ProjectMediaInput,
+} from "@/lib/projects/service";
 
 export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -75,6 +89,77 @@ export async function disconnectAccountAction(accountId: string) {
     await disconnectAccount(userId, accountId);
     revalidatePath("/accounts");
   });
+}
+
+const revalidateApp = () => revalidatePath("/", "layout");
+
+export async function switchProjectAction(projectId: string) {
+  return run(async (userId) => {
+    await assertProjectOwner(userId, projectId);
+    await setCurrentProjectCookie(projectId);
+    revalidateApp();
+  });
+}
+
+export async function createProjectFromLinkAction(link: string) {
+  return run(async (userId) => {
+    if (!link.trim()) throw new Error("Paste a link to your app");
+    const { project, warnings } = await createProjectFromLink(userId, link);
+    await setCurrentProjectCookie(project.id);
+    revalidateApp();
+    return { projectId: project.id, warnings };
+  });
+}
+
+export async function createBlankProjectAction(name: string) {
+  return run(async (userId) => {
+    const project = await createProject(userId, { name });
+    await setCurrentProjectCookie(project.id);
+    revalidateApp();
+    return { projectId: project.id, warnings: [] as string[] };
+  });
+}
+
+export async function updateProjectAction(projectId: string, patch: Pick<ProjectInput, "name" | "storeUrl" | "notes" | "kit">) {
+  return run(async (userId) => {
+    await updateProject(userId, projectId, patch);
+    revalidateApp();
+  });
+}
+
+export async function setProjectAccountsAction(projectId: string, accountIds: string[]) {
+  return run(async (userId) => {
+    await setProjectAccounts(userId, projectId, accountIds);
+    revalidateApp();
+  });
+}
+
+export async function setProjectMediaAction(projectId: string, items: ProjectMediaInput[]) {
+  return run(async (userId) => {
+    await setProjectMedia(userId, projectId, items);
+    revalidateApp();
+  });
+}
+
+export async function deleteProjectAction(projectId: string) {
+  return run(async (userId) => {
+    await deleteProject(userId, projectId);
+    const next = await defaultProject(userId);
+    if (next) await setCurrentProjectCookie(next.id);
+    revalidateApp();
+  });
+}
+
+export async function approveProposalAction(proposalId: string) {
+  return run(async (userId) => {
+    const proposal = await approveProposal(userId, proposalId);
+    revalidateApp();
+    return proposal;
+  });
+}
+
+export async function declineProposalAction(proposalId: string) {
+  return run((userId) => declineProposal(userId, proposalId));
 }
 
 export async function createApiKeyAction(name: string) {

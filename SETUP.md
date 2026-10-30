@@ -16,7 +16,7 @@ Throughout, `APP_URL` means your app's public URL: `http://localhost:3000` local
 ## 1. Clerk (sign-in)
 
 1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com). Pick the sign-in methods you want (email + Google is fine).
-2. **Configure → Restrictions → Sign-up mode → Restricted.** Do this once you've created your own account, so nobody else can sign up.
+2. **Configure → Restrictions → Sign-up mode → Public.** Vieews is multi-user: every query is scoped to the signed-in user, and each user's projects, accounts, posts and copilot chats are separate. (Choose **Restricted** instead while you're the only tester.)
 3. Copy the publishable and secret keys into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`. Paste only the value after the `=`.
 
 ## 2. Supabase (database + file storage)
@@ -24,7 +24,7 @@ Throughout, `APP_URL` means your app's public URL: `http://localhost:3000` local
 Supabase doesn't need to know about Clerk: only the server talks to it, and the browser uploads through one-time links the server creates.
 
 1. Create a project at [supabase.com](https://supabase.com/dashboard).
-2. **SQL Editor → New query**: paste all of `supabase/migrations/0001_init.sql` and run it, then do the same with each later migration in order (`0002_carousels_campaigns.sql` adds photo carousels, post campaigns/meta and media cleanup). Or with the Supabase CLI: `supabase link` then `supabase db push`.
+2. **SQL Editor → New query**: paste all of `supabase/migrations/0001_init.sql` and run it, then do the same with each later migration in order (`0002_carousels_campaigns.sql` adds photo carousels, post campaigns/meta and media cleanup; `0003_projects_copilot.sql` adds projects, accounts shared across projects, the copilot's chats and approvals, and the usage ledger, and puts each existing user's accounts and posts into a first project called "My app"). Or with the Supabase CLI: `supabase link` then `supabase db push`.
 3. **Project Settings → API Keys**: copy the project URL and a secret key into `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SECRET_KEY`. (Older projects: use the `service_role` key.) Keep the secret key out of code and chat.
 4. **Storage → Settings → Upload file size limit.** Free plan max is 50 MB per file. On Pro you can raise it (Instagram allows 300 MB, TikTok 4 GB).
 
@@ -80,6 +80,15 @@ Limits: until TikTok audits your app, posts are only visible to you (**"Only me"
 
 Photos are served from that prefix with signed links that expire after an hour.
 
+## 6b. Anthropic (the copilot)
+
+The copilot chat and "set up a project from a link" call the Claude API, which bills per use (separate from a Claude subscription).
+
+1. Create a key at [platform.claude.com](https://platform.claude.com) → **API keys** and put it in `ANTHROPIC_API_KEY`.
+2. Set a monthly spend limit there. Every call Vieews makes is also recorded per user in the `usage_events` table, with its cost in USD.
+
+The copilot runs on Claude Sonnet 5.5 and project drafting on Claude Haiku 5.5 (see `src/lib/ai/models.ts`).
+
 ## 7. Run it
 
 ```bash
@@ -89,7 +98,7 @@ npm run dev
 npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 ```
 
-Open http://localhost:3000, sign in, go to **Accounts** and connect each platform.
+Open http://localhost:3000 and sign in. Add your first project by pasting your app's store link (top-left menu → **New project**, or in the copilot), then go to **Accounts** and connect each platform. A newly connected account starts out posting for the project you're in; choose others in the project's settings.
 
 ## 8. Deploy to Vercel
 

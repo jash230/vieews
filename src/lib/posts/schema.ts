@@ -43,6 +43,7 @@ export const createPostSchema = z
       .max(MAX_CAROUSEL_ITEMS)
       .optional()
       .describe("Photos in order for a carousel (TikTok photo post or Instagram carousel). The first is the cover."),
+    projectId: z.string().uuid().nullish().describe("The project (app) this post promotes. Defaults to the first project."),
     caption: z.string().max(5000).default(""),
     scheduledFor: z.string().datetime({ offset: true }).nullish(),
     campaign: z.string().trim().min(1).max(100).nullish().describe('Optional grouping, e.g. "ad-studio:myapp". Filter list_posts by it.'),

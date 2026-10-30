@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { signToken, verifyToken } from "@/lib/crypto";
 import { env } from "@/lib/env";
+import { readCapped, safeFetch } from "@/lib/net/safe-fetch";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
 import { SUPPORTED_MIME } from "@/lib/platforms/limits";
 import type { MediaAssetRow, MediaKind } from "@/lib/types";
@@ -156,20 +157,13 @@ export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_
 const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 
 /** Downloads a public URL into storage (for agents that have a link rather than a local file). */
-export async function importMediaFromUrl(userId: string, sourceUrl: string): Promise<MediaAssetRow> {
-  const url = new URL(sourceUrl);
-  if (url.protocol !== "https:") throw new Error("Only https:// URLs can be imported");
-  if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/.test(url.hostname)) {
-    throw new Error("Private network addresses can't be imported");
-  }
-  const res = await fetch(url, { redirect: "follow" });
+export async function importMediaFromUrl(userId: string, sourceUrl: string, maxBytes = MAX_IMPORT_BYTES): Promise<MediaAssetRow> {
+  const res = await safeFetch(sourceUrl);
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`);
   const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim();
-  const size = Number(res.headers.get("content-length") ?? 0);
-  if (size > MAX_IMPORT_BYTES) throw new Error("File is larger than the 1 GB import limit");
-  const asset = await createMediaAsset(userId, { mime, sizeBytes: size });
-  const body = await res.arrayBuffer();
-  if (body.byteLength > MAX_IMPORT_BYTES) throw new Error("File is larger than the 1 GB import limit");
+  if (!kindForMime(mime)) throw new Error(`Unsupported file type ${mime || "unknown"}. Use MP4/MOV video or JPEG/PNG/WebP images.`);
+  const body = await readCapped(res, maxBytes);
+  const asset = await createMediaAsset(userId, { mime, sizeBytes: body.byteLength });
   const { error } = await supabaseAdmin().storage.from(MEDIA_BUCKET).upload(asset.storage_path, body, { contentType: mime, upsert: true });
   if (error) throw error;
   return finalizeMediaAsset(userId, asset.id);

@@ -1,6 +1,7 @@
 import "server-only";
 import { EVENTS, inngest } from "@/lib/inngest/client";
 import { validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
+import { assertProjectOwner, defaultProject, projectAccountIds } from "@/lib/projects/service";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow, PostRow, PostStatus, PostTargetRow, SocialAccountRow } from "@/lib/types";
 import { createPostSchema, mediaIdsOf, type CreatePostInput } from "./schema";
@@ -63,10 +64,14 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
   const input = parsed.data;
   const db = supabaseAdmin();
 
+  const project = input.projectId ? await assertProjectOwner(userId, input.projectId) : await defaultProject(userId);
+  if (!project) throw new PostValidationError(["Create a project for your app before posting"]);
+
   const items = await loadReadyMedia(userId, mediaIdsOf(input));
   const media = items[0];
 
   const accountIds = [...new Set(input.targets.map((t) => t.accountId))];
+  const linked = new Set(await projectAccountIds(userId, project.id));
   const { data: accounts, error: accErr } = await db.from("social_accounts").select("id, platform, status").eq("user_id", userId).in("id", accountIds);
   if (accErr) throw accErr;
   const byId = new Map((accounts ?? []).map((a) => [a.id, a]));
@@ -77,6 +82,7 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
     const account = byId.get(t.accountId);
     if (!account) problems.push(`Account ${t.accountId} isn't connected`);
     else if (account.platform !== t.options.platform) problems.push(`Account ${t.accountId} is ${account.platform}, not ${t.options.platform}`);
+    else if (!linked.has(account.id)) problems.push(`Your ${account.platform} account isn't added to ${project.name}. Add it in the project's settings.`);
     else if (account.status !== "active") problems.push(`Reconnect your ${account.platform} account before posting`);
     issues.push(...validateMedia(items.map(mediaInfoOf), t.captionOverride ?? input.caption, t.options, extra));
   }
@@ -91,6 +97,7 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
     .from("posts")
     .insert({
       user_id: userId,
+      project_id: project.id,
       caption: input.caption,
       media_asset_id: media.id,
       scheduled_for: isScheduled ? scheduledFor!.toISOString() : null,
@@ -139,9 +146,10 @@ export async function getPost(userId: string, postId: string): Promise<PostWithT
 
 export async function listPosts(
   userId: string,
-  opts: { limit?: number; status?: PostStatus[]; upcoming?: boolean; campaign?: string; since?: string; before?: string } = {},
+  opts: { limit?: number; status?: PostStatus[]; upcoming?: boolean; campaign?: string; since?: string; before?: string; projectId?: string } = {},
 ): Promise<PostWithTargets[]> {
   let q = supabaseAdmin().from("posts").select(POST_SELECT).eq("user_id", userId);
+  if (opts.projectId) q = q.eq("project_id", opts.projectId);
   if (opts.status?.length) q = q.in("status", opts.status);
   if (opts.campaign) q = q.eq("campaign", opts.campaign);
   if (opts.since) q = q.gte("created_at", opts.since);

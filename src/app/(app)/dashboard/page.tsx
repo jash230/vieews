@@ -7,7 +7,9 @@ import { PostRow } from "@/components/app/post-row";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, Notice, PageHeader, Skeleton } from "@/components/ui/misc";
-import { listAccounts } from "@/lib/accounts/service";
+import { NoProject } from "@/components/app/no-project";
+import { getCurrentProject } from "@/lib/projects/current";
+import { listProjectAccounts } from "@/lib/projects/service";
 import { signedReadUrls } from "@/lib/media/service";
 import { listPosts } from "@/lib/posts/service";
 
@@ -41,10 +43,12 @@ function DashboardSkeleton() {
 
 async function DashboardContent() {
   const { userId } = await auth.protect();
+  const project = await getCurrentProject(userId);
+  if (!project) return <NoProject />;
   const [accounts, upcoming, recent] = await Promise.all([
-    listAccounts(userId),
-    listPosts(userId, { status: ["scheduled"], upcoming: true, limit: 5 }),
-    listPosts(userId, { limit: 8 }),
+    listProjectAccounts(userId, project.id),
+    listPosts(userId, { projectId: project.id, status: ["scheduled"], upcoming: true, limit: 5 }),
+    listPosts(userId, { projectId: project.id, limit: 8 }),
   ]);
   const thumbs = await signedReadUrls([...upcoming, ...recent].map((p) => p.media?.thumbnail_path ?? ""));
   const needsReauth = accounts.filter((a) => a.status === "needs_reauth");
@@ -86,9 +90,9 @@ async function DashboardContent() {
         <Card>
           <EmptyState
             icon={<Link2 />}
-            title="Connect your first account"
-            description="Link YouTube, Instagram or TikTok so Vieews can post for you."
-            action={<ButtonLink href="/accounts">Connect accounts</ButtonLink>}
+            title={`Choose where ${project.name} posts`}
+            description="Pick which connected YouTube, Instagram or TikTok accounts post for this project."
+            action={<ButtonLink href={`/projects/${project.id}`}>Choose accounts</ButtonLink>}
           />
         </Card>
       ) : (

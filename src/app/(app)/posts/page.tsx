@@ -8,6 +8,8 @@ import { Card } from "@/components/ui/card";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
 import { signedReadUrls } from "@/lib/media/service";
 import { listPosts } from "@/lib/posts/service";
+import { NoProject } from "@/components/app/no-project";
+import { getCurrentProject } from "@/lib/projects/current";
 import type { PostStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -69,7 +71,9 @@ async function PostList({ searchParams }: Pick<PageProps<"/posts">, "searchParam
   const { userId } = await auth.protect();
   const sp = await searchParams;
   const filter = FILTERS.find((f) => f.key === sp.filter) ?? FILTERS[0];
-  const posts = await listPosts(userId, { status: filter.status, upcoming: filter.key === "scheduled", limit: 100 });
+  const project = await getCurrentProject(userId);
+  if (!project) return <NoProject />;
+  const posts = await listPosts(userId, { projectId: project.id, status: filter.status, upcoming: filter.key === "scheduled", limit: 100 });
   const thumbs = await signedReadUrls(posts.map((p) => p.media?.thumbnail_path ?? ""));
 
   return (

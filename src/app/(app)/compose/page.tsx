@@ -4,7 +4,9 @@ import { Suspense } from "react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
-import { listAccounts } from "@/lib/accounts/service";
+import { NoProject } from "@/components/app/no-project";
+import { getCurrentProject } from "@/lib/projects/current";
+import { listProjectAccounts } from "@/lib/projects/service";
 import { Composer } from "./composer";
 
 export const metadata = { title: "Create post" };
@@ -22,18 +24,20 @@ export default function ComposePage() {
 
 async function ComposeForm() {
   const { userId } = await auth.protect();
-  const accounts = (await listAccounts(userId)).filter((a) => a.status === "active");
+  const project = await getCurrentProject(userId);
+  if (!project) return <NoProject />;
+  const accounts = (await listProjectAccounts(userId, project.id)).filter((a) => a.status === "active");
 
   return accounts.length === 0 ? (
     <Card>
       <EmptyState
         icon={<Link2 />}
-        title="No accounts to post to"
-        description="Connect YouTube, Instagram or TikTok first."
-        action={<ButtonLink href="/accounts">Connect accounts</ButtonLink>}
+        title={`No accounts post for ${project.name} yet`}
+        description="Pick which of your connected accounts this project posts to, or connect a new one."
+        action={<ButtonLink href={`/projects/${project.id}`}>Choose accounts</ButtonLink>}
       />
     </Card>
   ) : (
-    <Composer accounts={accounts} />
+    <Composer key={project.id} accounts={accounts} projectId={project.id} />
   );
 }

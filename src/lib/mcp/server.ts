@@ -7,6 +7,8 @@ import { LIMITS, SUPPORTED_MIME } from "@/lib/platforms/limits";
 import { getCreatorInfo } from "@/lib/platforms/tiktok";
 import { createPostSchema } from "@/lib/posts/schema";
 import { cancelPost, createPost, getPost, listPosts, PostValidationError, retryTarget, type PostWithTargets } from "@/lib/posts/service";
+import { getProject, listProjects } from "@/lib/projects/service";
+import { projectSummary } from "@/lib/projects/summary";
 
 type ToolCtx = { http?: { authInfo?: { extra?: Record<string, unknown> } } };
 
@@ -25,6 +27,7 @@ const fail = (err: unknown) => ({
 function summarizePost(p: PostWithTargets) {
   return {
     id: p.id,
+    project_id: p.project_id,
     status: p.status,
     caption: p.caption,
     scheduled_for: p.scheduled_for,
@@ -56,6 +59,29 @@ function tool<A>(fn: (args: A, userId: string) => Promise<unknown>) {
 }
 
 export function registerTools(server: McpServer) {
+  server.registerTool(
+    "list_projects",
+    {
+      title: "List projects",
+      description: "Lists the user's projects (one per app they promote). Pass a project's id as projectId to create_post and list_posts.",
+      inputSchema: z.object({}),
+    },
+    tool(async (_args: Record<string, never>, userId) =>
+      (await listProjects(userId)).map((p) => ({ id: p.id, name: p.name, store_url: p.store_url, one_liner: p.kit.oneLiner })),
+    ),
+  );
+
+  server.registerTool(
+    "get_project",
+    {
+      title: "Get project",
+      description:
+        "Returns a project's kit (audience, pains, claims ads may and may not make, CTA, brand), its screenshots with signed URLs and what each shows, and the accounts it posts to.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    tool(async ({ projectId }: { projectId: string }, userId) => projectSummary(userId, await getProject(userId, projectId))),
+  );
+
   server.registerTool(
     "list_accounts",
     {
@@ -187,6 +213,7 @@ export function registerTools(server: McpServer) {
         "Lists posts newest first, with their campaign and meta. Filter by status, campaign, or creation time (since, ISO). Page back by passing the oldest created_at you got as before.",
       inputSchema: z.object({
         status: z.array(z.enum(["scheduled", "publishing", "published", "partial", "failed", "canceled"])).optional(),
+        projectId: z.string().uuid().optional().describe("Only this project's posts"),
         campaign: z.string().optional(),
         since: z.string().datetime({ offset: true }).optional(),
         before: z.string().datetime({ offset: true }).optional(),
@@ -197,6 +224,7 @@ export function registerTools(server: McpServer) {
       async (
         args: {
           status?: ("scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled")[];
+          projectId?: string;
           campaign?: string;
           since?: string;
           before?: string;

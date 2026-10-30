@@ -128,7 +128,7 @@ function MediaRow({
   );
 }
 
-export function Composer({ accounts }: { accounts: PublicAccount[] }) {
+export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; projectId: string }) {
   const router = useRouter();
   const ids = useId();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -291,6 +291,7 @@ export function Composer({ accounts }: { accounts: PublicAccount[] }) {
     }
     const input: CreatePostInput = {
       ...(assetIds.length > 1 ? { mediaAssetIds: assetIds } : { mediaAssetId: assetIds[0] }),
+      projectId,
       caption,
       scheduledFor: when === "later" ? new Date(scheduleAt).toISOString() : null,
       targets: selectedAccounts.map((a) => ({

@@ -103,6 +103,16 @@ async function uploadOne(file: File, meta: MediaMeta, onProgress: (fraction: num
   return assetId;
 }
 
+/** Uploads one file outside the composer (project screenshots, copilot attachments). Returns the asset id. */
+export async function uploadFile(file: File, onProgress: (fraction: number) => void = () => {}) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await uploadOne(file, await readMediaMeta(file, url), onProgress, () => {});
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export interface UploadItem {
   key: string;
   file: File;
