@@ -78,3 +78,40 @@ describe("copilot history", () => {
     expect(dropDeclinedBlocks([{ type: "thinking" }, { type: "text" }])).toHaveLength(2);
   });
 });
+
+describe("closeOrphanedToolCalls", async () => {
+  const { closeOrphanedToolCalls } = await import("@/lib/copilot/history");
+  type Msg = Parameters<typeof closeOrphanedToolCalls>[0][number];
+  const call = (id: string) => ({ type: "tool_use" as const, id, name: "get_post", input: {} });
+
+  it("answers a tool call that never got a result, ahead of the next user text", () => {
+    const msgs: Msg[] = [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [call("t1")] },
+      { role: "user", content: [{ type: "text", text: "again" }] },
+    ];
+    const out = closeOrphanedToolCalls(msgs);
+    expect(out).toHaveLength(3);
+    const next = out[2].content as { type: string; tool_use_id?: string }[];
+    expect(next.map((b) => b.type)).toEqual(["tool_result", "text"]);
+    expect(next[0].tool_use_id).toBe("t1");
+  });
+
+  it("only fills the results that are missing", () => {
+    const msgs: Msg[] = [
+      { role: "assistant", content: [call("a"), call("b")] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: "ok" }] },
+    ];
+    const ids = (closeOrphanedToolCalls(msgs)[1].content as { tool_use_id: string }[]).map((b) => b.tool_use_id);
+    expect(ids.sort()).toEqual(["a", "b"]);
+  });
+
+  it("leaves complete histories alone", () => {
+    const msgs: Msg[] = [
+      { role: "assistant", content: [call("a")] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: "ok" }] },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+    ];
+    expect(closeOrphanedToolCalls(msgs)).toEqual(msgs);
+  });
+});

@@ -123,18 +123,42 @@ async function decide(row: ProposalRow, status: ProposalStatus, result: Proposal
   return (await toViews(row.user_id, [data as ProposalRow]))[0];
 }
 
+/** Sets the outcome of a proposal this request already claimed. */
+async function settle(row: ProposalRow, status: ProposalStatus, result: ProposalView["result"]): Promise<ProposalView> {
+  const { data, error } = await supabaseAdmin()
+    .from("copilot_proposals")
+    .update({ status, result })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return (await toViews(row.user_id, [data as ProposalRow]))[0];
+}
+
 /** The user pressed Approve: create the post exactly as proposed. */
 export async function approveProposal(userId: string, proposalId: string): Promise<ProposalView> {
-  const row = await getPending(userId, proposalId);
+  const pending = await getPending(userId, proposalId);
+  // Claim the proposal first so a double press or a second tab can't post it twice.
+  const { data: claimed, error } = await supabaseAdmin()
+    .from("copilot_proposals")
+    .update({ status: "approved", decided_at: new Date().toISOString() })
+    .eq("id", pending.id)
+    .eq("user_id", userId)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (!claimed) throw new Error("This was already decided");
+  const row = claimed as ProposalRow;
   try {
     const input = { ...row.input, projectId: row.project_id, meta: { source: "copilot", reason: row.input.reason ?? null } };
     delete input.reason;
     // createPost validates the stored input against createPostSchema itself.
     const post = await createPost(userId, input as unknown as CreatePostInput, "web");
-    return decide(row, "approved", { postId: post.id });
+    return settle(row, "approved", { postId: post.id });
   } catch (err) {
     const message = err instanceof PostValidationError || err instanceof Error ? err.message : "Couldn't create the post";
-    return decide(row, "failed", { error: message });
+    return settle(row, "failed", { error: message });
   }
 }
 
@@ -153,7 +177,8 @@ export async function takeUnreportedDecisions(userId: string, projectId: string)
     .neq("status", "pending")
     .is("reported_at", null);
   if (error) throw error;
-  const rows = (data ?? []) as ProposalRow[];
+  // An approval still creating its post has no result yet; report it next time.
+  const rows = ((data ?? []) as ProposalRow[]).filter((r) => r.status !== "approved" || r.result);
   if (!rows.length) return [];
   await db.from("copilot_proposals").update({ reported_at: new Date().toISOString() }).in("id", rows.map((r) => r.id));
   return rows.map((r) =>

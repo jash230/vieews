@@ -4,6 +4,7 @@ import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsag
 import { appMediaUrl, purgeMediaFile, signedReadUrl } from "@/lib/media/service";
 import { adapters } from "@/lib/platforms";
 import { PlatformError, type PublishContext } from "@/lib/platforms/types";
+import { mediaIdsOf } from "@/lib/posts/schema";
 import { refreshPostStatus } from "@/lib/posts/service";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow, PostRow, PostTargetRow, SocialAccountRow } from "@/lib/types";
@@ -30,32 +31,41 @@ export const publishPost = inngest.createFunction(
     const targets = await step.run("start-publishing", async () => {
       const db = supabaseAdmin();
       // Re-check: the post may have been canceled while we slept.
-      const { data: fresh } = await db.from("posts").select("status").eq("id", postId).single();
-      if (!fresh || fresh.status === "canceled") return [];
-      await db.from("posts").update({ status: "publishing" }).eq("id", postId);
+      // Conditional, so a cancel landing between the check and the update still wins.
+      const { data: claimed } = await db
+        .from("posts")
+        .update({ status: "publishing" })
+        .eq("id", postId)
+        .in("status", ["scheduled", "publishing"])
+        .select("id");
+      if (!claimed?.length) return [];
       const { data } = await db.from("post_targets").select("id, social_account_id").eq("post_id", postId).eq("status", "pending");
+      // Every account was disconnected (targets cascade away): settle the post instead of leaving it publishing.
+      if (!data?.length) await refreshPostStatus(postId);
       return data ?? [];
     });
 
     if (targets.length) {
       await step.sendEvent(
         "fan-out",
-        targets.map((t) => ({ name: EVENTS.targetPublish, data: { targetId: t.id, accountId: t.social_account_id } })),
+        targets.map((t) => ({ name: EVENTS.targetPublish, data: { targetId: t.id, accountId: t.social_account_id, postId } })),
       );
     }
     return { targets: targets.length };
   },
 );
 
-async function failTarget(targetId: string, message: string) {
+async function failTarget(targetId: string, message: string, postId?: string) {
   const db = supabaseAdmin();
   const { data } = await db
     .from("post_targets")
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("id", targetId)
     .select("post_id")
-    .single();
-  if (data) await refreshPostStatus(data.post_id);
+    .maybeSingle();
+  // The target is gone when its account was disconnected mid-publish; still settle the post.
+  const owner = data?.post_id ?? postId;
+  if (owner) await refreshPostStatus(owner);
 }
 
 export const publishTarget = inngest.createFunction(
@@ -66,8 +76,8 @@ export const publishTarget = inngest.createFunction(
     // One upload at a time per connected account keeps us inside platform rate limits.
     concurrency: { key: "event.data.accountId", limit: 1 },
     onFailure: async ({ event, error }) => {
-      const targetId = (event.data.event.data as { targetId: string }).targetId;
-      await failTarget(targetId, error.message);
+      const { targetId, postId } = event.data.event.data as { targetId: string; postId?: string };
+      await failTarget(targetId, error.message, postId);
     },
   },
   async ({ event, step }) => {
@@ -183,11 +193,24 @@ export const cleanupMedia = inngest.createFunction(
         .from("posts")
         .select("status, published_at, updated_at, media_asset_id")
         .in("media_asset_id", assets.map((a) => a.id));
+      // Files a project keeps (icon, screens, magic-moment clips) or a pending copilot proposal uses are never cleaned up.
+      const ids = assets.map((a) => a.id as string);
+      const [{ data: projectMedia }, { data: projects }, { data: proposals }] = await Promise.all([
+        db.from("project_media").select("media_asset_id").in("media_asset_id", ids),
+        db.from("projects").select("icon_asset_id, magic:kit->magicMoment->mediaIds"),
+        db.from("copilot_proposals").select("input").eq("status", "pending"),
+      ]);
+      const pinned = new Set<string>([
+        ...(projectMedia ?? []).map((r) => r.media_asset_id as string),
+        ...(projects ?? []).flatMap((p) => [p.icon_asset_id as string | null, ...((p.magic as string[] | null) ?? [])]).filter((x): x is string => !!x),
+        ...(proposals ?? []).flatMap((p) => mediaIdsOf((p.input ?? {}) as { mediaAssetId?: string; mediaAssetIds?: string[] })),
+      ]);
       const usage = new Map<string, PostUsage[]>();
       const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
       for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
       for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
       return assets
+        .filter((a) => !pinned.has(a.id as string))
         .filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()))
         .map((a) => ({ id: a.id as string, storage_path: a.storage_path as string }));
     });

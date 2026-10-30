@@ -107,9 +107,13 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
       const message = await stream.finalMessage();
       void recordClaudeUsage(userId, projectId, message.model, message.usage, "copilot");
 
-      const assistant = dropDeclinedBlocks(message.content) as Anthropic.Beta.BetaContentBlockParam[];
-      await appendRow(userId, projectId, "assistant", { content: assistant });
-      messages.push({ role: "assistant", content: assistant });
+      let assistant = dropDeclinedBlocks(message.content) as Anthropic.Beta.BetaContentBlockParam[];
+      // A reply cut off by max_tokens can end in a half-written tool call that will never run.
+      if (message.stop_reason === "max_tokens") assistant = assistant.filter((b) => b.type !== "tool_use");
+      if (assistant.length) {
+        await appendRow(userId, projectId, "assistant", { content: assistant });
+        messages.push({ role: "assistant", content: assistant });
+      }
 
       if (message.stop_reason === "refusal") {
         yield { type: "error", message: "I can't help with that one." };
@@ -117,12 +121,12 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
       }
       if (message.stop_reason === "pause_turn") continue;
 
-      const toolUses = assistant.filter((b): b is Anthropic.Beta.BetaToolUseBlockParam => b.type === "tool_use");
-      if (!toolUses.length) break;
       if (message.stop_reason === "max_tokens") {
         yield { type: "error", message: "That answer ran too long. Try asking for less at once." };
         break;
       }
+      const toolUses = assistant.filter((b): b is Anthropic.Beta.BetaToolUseBlockParam => b.type === "tool_use");
+      if (!toolUses.length) break;
 
       const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
       let changed = false;

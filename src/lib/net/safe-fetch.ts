@@ -30,20 +30,46 @@ function isPrivateV4([a, b]: number[]): boolean {
   );
 }
 
+/** The eight 16-bit groups of an IPv6 address (dotted IPv4 tails included), or null. */
+function ipv6Groups(addr: string): number[] | null {
+  let text = addr.split("%")[0];
+  const tail = text.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (tail) {
+    const v4 = ipv4Parts(tail[1]);
+    if (!v4) return null;
+    text = text.slice(0, -tail[1].length) + `${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part ? part.split(":").map((g) => parseInt(g, 16)) : []);
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
+  const fill = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  const groups = [...head, ...Array(Math.max(fill, 0)).fill(0), ...rest];
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+const embeddedV4 = (hi: number, lo: number) => [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff];
+
 /** True for loopback, private, link-local, CGNAT, multicast and other non-public addresses. */
 export function isPrivateAddress(ip: string): boolean {
   const addr = ip.replace(/^\[|\]$/g, "").toLowerCase();
   const v4 = ipv4Parts(addr);
   if (v4) return isPrivateV4(v4);
-  if (isIP(addr) !== 6) return true;
-  if (addr === "::" || addr === "::1") return true;
-  const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateAddress(mapped[1]);
-  const first = parseInt(addr.split(":")[0] || "0", 16);
+  if (isIP(addr.split("%")[0]) !== 6) return true;
+  const g = ipv6Groups(addr);
+  if (!g) return true;
+  const zeros = (from: number, to: number) => g.slice(from, to).every((x) => x === 0);
+  // ::ffff:a.b.c.d (mapped) and 64:ff9b::a.b.c.d (NAT64) reach the embedded IPv4 address.
+  if (zeros(0, 5) && g[5] === 0xffff) return isPrivateV4(embeddedV4(g[6], g[7]));
+  if (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6)) return isPrivateV4(embeddedV4(g[6], g[7]));
+  if (g[0] === 0x2002) return isPrivateV4(embeddedV4(g[1], g[2])); // 6to4
+  if (zeros(0, 6)) return true; // ::, ::1 and deprecated IPv4-compatible ::a.b.c.d
+  if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo tunnels
   return (
-    (first & 0xfe00) === 0xfc00 || // fc00::/7 unique local
-    (first & 0xffc0) === 0xfe80 || // fe80::/10 link-local
-    (first & 0xff00) === 0xff00 // multicast
+    (g[0] & 0xfe00) === 0xfc00 || // fc00::/7 unique local
+    (g[0] & 0xffc0) === 0xfe80 || // fe80::/10 link-local
+    (g[0] & 0xff00) === 0xff00 // multicast
   );
 }
 

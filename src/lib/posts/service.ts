@@ -164,7 +164,9 @@ export async function cancelPost(userId: string, postId: string) {
   const post = await getPost(userId, postId);
   if (post.status !== "scheduled") throw new Error("Only scheduled posts can be canceled");
   const db = supabaseAdmin();
-  await db.from("posts").update({ status: "canceled" }).eq("id", postId).eq("status", "scheduled");
+  const { data: canceled } = await db.from("posts").update({ status: "canceled" }).eq("id", postId).eq("status", "scheduled").select("id");
+  // Publishing started between the check and the update; leave its targets alone.
+  if (!canceled?.length) throw new Error("This post has started publishing and can't be canceled");
   await db.from("post_targets").update({ status: "canceled" }).eq("post_id", postId).eq("status", "pending");
   await inngest.send({ name: EVENTS.postCanceled, data: { postId } });
 }

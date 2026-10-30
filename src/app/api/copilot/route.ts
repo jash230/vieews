@@ -12,6 +12,16 @@ const bodySchema = z.object({
   timeZone: z.string().max(64).default("UTC"),
 });
 
+/** Accepts any zone the runtime can format, including aliases (Asia/Kolkata, UTC) that supportedValuesOf omits. */
+function isTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Streams one copilot turn as NDJSON (one CopilotEvent per line). */
 export async function POST(req: Request) {
   const { userId } = await auth();
@@ -27,7 +37,7 @@ export async function POST(req: Request) {
     if (err instanceof ProjectNotFoundError) return Response.json({ error: "Project not found" }, { status: 404 });
     throw err;
   }
-  const timeZone = Intl.supportedValuesOf("timeZone").includes(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
+  const timeZone = isTimeZone(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
 
   const encoder = new TextEncoder();
   const events = runTurn({ userId, projectId, text: text.trim(), attachments, timeZone, signal: req.signal });

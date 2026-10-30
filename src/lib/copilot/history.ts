@@ -54,7 +54,42 @@ export async function appendRow(userId: string, projectId: string, role: "user" 
 export function toApiMessages(rows: MessageRow[]): Anthropic.Beta.BetaMessageParam[] {
   let start = Math.max(0, rows.length - REPLAY_ROWS);
   while (start < rows.length && !(rows[start].role === "user" && rows[start].parts.display)) start++;
-  return rows.slice(start).map((r) => ({ role: r.role, content: r.parts.content }));
+  return closeOrphanedToolCalls(rows.slice(start).map((r) => ({ role: r.role, content: r.parts.content })));
+}
+
+const INTERRUPTED = "Interrupted before this tool finished. Nothing more is known about its result.";
+
+/**
+ * A turn cut off mid-tool (closed tab, max_tokens, a crash) leaves a tool_use with no tool_result,
+ * which the API rejects on every later turn. Answer each such call as interrupted so the chat recovers.
+ */
+export function closeOrphanedToolCalls(messages: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaMessageParam[] {
+  const out: Anthropic.Beta.BetaMessageParam[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    out.push(msg);
+    if (msg.role !== "assistant" || typeof msg.content === "string") continue;
+    const callIds = msg.content.flatMap((b) => (b.type === "tool_use" ? [b.id] : []));
+    if (!callIds.length) continue;
+    const next = messages[i + 1];
+    const answered = new Set(
+      next?.role === "user" && typeof next.content !== "string"
+        ? next.content.flatMap((b) => (b.type === "tool_result" ? [b.tool_use_id] : []))
+        : [],
+    );
+    const missing: Anthropic.Beta.BetaToolResultBlockParam[] = callIds
+      .filter((id) => !answered.has(id))
+      .map((id) => ({ type: "tool_result", tool_use_id: id, content: INTERRUPTED, is_error: true }));
+    if (!missing.length || !next) continue;
+    if (next.role === "user") {
+      const rest = typeof next.content === "string" ? [{ type: "text" as const, text: next.content }] : next.content;
+      // Tool results must lead the user message that follows the call.
+      messages = [...messages.slice(0, i + 1), { role: "user", content: [...missing, ...rest] }, ...messages.slice(i + 2)];
+    } else {
+      out.push({ role: "user", content: missing });
+    }
+  }
+  return out;
 }
 
 /**

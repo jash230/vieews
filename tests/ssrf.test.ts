@@ -16,6 +16,13 @@ describe("isPrivateAddress", () => {
 
   it.each(["93.184.216.34", "172.32.0.1", "8.8.8.8", "2606:4700::1111", "::ffff:8.8.8.8"])("allows %s", (ip) => expect(isPrivateAddress(ip)).toBe(false));
 
+  it.each(["::ffff:7f00:1", "[::ffff:7f00:1]", "::ffff:a9fe:a9fe", "::7f00:1", "::127.0.0.1", "64:ff9b::a9fe:a9fe", "2002:7f00:1::", "2001:0:4136:e378::1"])(
+    "blocks IPv6 forms of private IPv4 %s",
+    (ip) => expect(isPrivateAddress(ip)).toBe(true),
+  );
+
+  it.each(["::ffff:808:808", "64:ff9b::808:808", "2002:808:808::1"])("allows IPv6 forms of public IPv4 %s", (ip) => expect(isPrivateAddress(ip)).toBe(false));
+
   it("treats garbage as unsafe", () => expect(isPrivateAddress("not-an-ip")).toBe(true));
 });
 

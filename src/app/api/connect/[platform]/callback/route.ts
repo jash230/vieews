@@ -19,7 +19,12 @@ export async function GET(req: NextRequest, { params }: RouteContext<"/api/conne
 
   const url = req.nextUrl;
   const cookie = req.cookies.get(oauthCookie(platform))?.value;
-  const saved = cookie ? (JSON.parse(cookie) as { state: string; codeVerifier: string; userId: string }) : null;
+  let saved: { state: string; codeVerifier: string; userId: string } | null = null;
+  try {
+    saved = cookie ? JSON.parse(cookie) : null;
+  } catch {
+    // A corrupt cookie is treated like an expired sign-in below.
+  }
 
   const providerError = url.searchParams.get("error_description") ?? url.searchParams.get("error");
   const code = url.searchParams.get("code");

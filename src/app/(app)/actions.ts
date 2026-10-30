@@ -122,7 +122,9 @@ export async function createBlankProjectAction(name: string) {
 
 export async function updateProjectAction(projectId: string, patch: Pick<ProjectInput, "name" | "storeUrl" | "notes" | "kit">) {
   return run(async (userId) => {
-    await updateProject(userId, projectId, patch);
+    // Server action arguments come straight from the client: only pass the fields this form edits.
+    const { name, storeUrl, notes, kit } = patch;
+    await updateProject(userId, projectId, { name, storeUrl, notes, kit });
     revalidateApp();
   });
 }
