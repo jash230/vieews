@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
+import { cloneElement, isValidElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const control =
@@ -24,6 +24,15 @@ export function Select({ className, ...props }: ComponentProps<"select">) {
 
 export function Label({ className, ...props }: ComponentProps<"label">) {
   return <label className={cn("text-sm font-medium text-foreground", className)} {...props} />;
+}
+
+/** Links the field's hint or error to its control so screen readers read it on focus. */
+function describe(children: ReactNode, id: string, describedBy: string | undefined, invalid: boolean): ReactNode {
+  if (!isValidElement<{ id?: string; "aria-describedby"?: string }>(children) || children.props.id !== id) return children;
+  return cloneElement(children as ReactElement<Record<string, unknown>>, {
+    "aria-describedby": [children.props["aria-describedby"], describedBy].filter(Boolean).join(" ") || undefined,
+    ...(invalid ? { "aria-invalid": true } : {}),
+  });
 }
 
 export function Field({
@@ -58,7 +67,7 @@ export function Field({
           </span>
         )}
       </div>
-      {children}
+      {describe(children, id, error ? `${id}-error` : hint ? `${id}-hint` : undefined, !!error)}
       {error ? (
         <p id={`${id}-error`} role="alert" className="text-sm text-destructive">{error}</p>
       ) : hint ? (

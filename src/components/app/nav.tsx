@@ -39,6 +39,8 @@ function TabList({ pathname, className }: { pathname: string | null; className?:
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
+            // On phones the tab row scrolls; bring the current tab into view.
+            ref={active ? (el) => el?.scrollIntoView({ block: "nearest", inline: "nearest" }) : undefined}
             className={cn(
               "group relative flex min-h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors duration-150",
               active ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-primary-soft/60 hover:text-foreground",

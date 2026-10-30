@@ -134,7 +134,8 @@ function HoldToApprove({ label, onConfirm, disabled }: { label: string; onConfir
       Hold to {label.toLowerCase()}
       <span
         aria-hidden
-        className="absolute inset-0 flex items-center justify-center bg-primary text-on-primary"
+        data-holding={holding}
+        className="hold-fill absolute inset-0 flex items-center justify-center bg-primary text-on-primary"
         style={{
           clipPath: holding ? "inset(0 0 0 0)" : "inset(0 100% 0 0)",
           transition: holding ? `clip-path ${HOLD_MS}ms linear` : "clip-path 200ms cubic-bezier(0.23, 1, 0.32, 1)",

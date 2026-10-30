@@ -242,6 +242,8 @@ summary {
 }
 /* The ring never stops (no hover pause). Under reduced motion it keeps turning, just slower. */
 @media (prefers-reduced-motion: reduce) {
+  /* The hold-to-approve fill is a progress bar, not decoration: keep its timing. */
+  .hold-fill[data-holding="true"] { transition-duration: 900ms !important; }
   .orbit { --orbit-duration: 90s; }
   .orbit-spin,
   .orbit-face {

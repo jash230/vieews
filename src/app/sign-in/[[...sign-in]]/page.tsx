@@ -21,13 +21,13 @@ export default function SignInPage() {
       <div className="pointer-events-none absolute -left-24 -top-24 size-72 animate-float rounded-full bg-brand-tea/50 blur-3xl" aria-hidden />
       <div className="pointer-events-none absolute -bottom-24 -right-16 size-80 animate-float rounded-full bg-brand-teal/30 blur-3xl [animation-delay:-3s]" aria-hidden />
       <div className="relative flex animate-fade-up flex-col items-center gap-8">
-        <Logo />
+        <Logo href="/" />
         {/* Suspense covers the server render; ClerkLoading covers Clerk's script loading in the browser. */}
         <Suspense fallback={<CardPlaceholder />}>
           <ClerkLoading>
             <CardPlaceholder />
           </ClerkLoading>
-          <SignIn forceRedirectUrl="/dashboard" />
+          <SignIn withSignUp forceRedirectUrl="/dashboard" signUpForceRedirectUrl="/dashboard" />
         </Suspense>
       </div>
     </div>

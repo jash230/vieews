@@ -34,7 +34,7 @@ export default function Home() {
       <div className="pointer-events-none absolute left-1/3 top-[36rem] size-80 animate-float rounded-full bg-brand-olive/25 blur-3xl [animation-delay:-4s]" aria-hidden />
 
       <header className={`relative py-4 ${SHELL}`}>
-        <Logo />
+        <Logo href="/" />
       </header>
 
       <main className={`relative pb-20 ${SHELL}`}>

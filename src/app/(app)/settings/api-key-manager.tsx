@@ -18,6 +18,7 @@ interface KeyView {
 
 function CopyBlock({ label, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
   return (
     <div>
       <p className="mb-1.5 text-sm font-medium">{label}</p>
@@ -27,15 +28,51 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
           type="button"
           aria-label={copied ? "Copied" : `Copy ${label}`}
           onClick={async () => {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+              await navigator.clipboard.writeText(text);
+              setCopied(true);
+            } catch {
+              setFailed(true);
+            }
+            setTimeout(() => {
+              setCopied(false);
+              setFailed(false);
+            }, 2000);
           }}
           className="absolute right-1.5 top-1.5 grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           {copied ? <Check className="size-4 text-success" aria-hidden /> : <Copy className="size-4" aria-hidden />}
         </button>
       </div>
+      <p role="status" className={failed ? "mt-1 text-xs text-destructive" : "sr-only"}>
+        {failed ? "Couldn't copy. Select the text and copy it by hand." : copied ? "Copied" : ""}
+      </p>
+    </div>
+  );
+}
+
+/** Its own pending state, so revoking one key doesn't spin the Create button or show errors under it. */
+function RevokeButton({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="shrink-0 text-right">
+      <Button
+        variant="destructive"
+        size="sm"
+        loading={pending}
+        onClick={() => {
+          if (!confirm(`Revoke "${name}"? Anything using it will stop working.`)) return;
+          setError(null);
+          start(async () => {
+            const res = await revokeApiKeyAction(id);
+            if (!res.ok) setError(res.error);
+          });
+        }}
+      >
+        <Trash2 aria-hidden /> Revoke
+      </Button>
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -117,19 +154,7 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
                     <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
                   </p>
                 </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
-                    start(async () => {
-                      const res = await revokeApiKeyAction(k.id);
-                      if (!res.ok) setError(res.error);
-                    });
-                  }}
-                >
-                  <Trash2 aria-hidden /> Revoke
-                </Button>
+                <RevokeButton id={k.id} name={k.name} />
               </li>
             ))}
           </ul>

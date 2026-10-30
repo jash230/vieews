@@ -385,7 +385,7 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
             });
           }}
         >
-          <Trash2 aria-hidden /> Delete {name}
+          <Trash2 aria-hidden /> Delete project
         </Button>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </CardBody>

@@ -99,6 +99,22 @@ export function CopilotPanel({
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const fab = useRef<HTMLButtonElement>(null);
+
+  // The phone sheet behaves like a dialog: focus moves in, Esc closes it, focus returns to the button.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const opener = fab.current;
+    document.getElementById("copilot-input")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus();
+    };
+  }, [mobileOpen]);
   const streaming = live !== null;
   const collapsed = storedCollapsed === "1";
   const width = dragWidth ?? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Number(storedWidth) || 384));
@@ -262,6 +278,7 @@ export function CopilotPanel({
 
       <aside
         aria-label="Copilot"
+        {...(mobileOpen ? { role: "dialog", "aria-modal": true } : {})}
         style={{ "--copilot-w": `${width}px` } as React.CSSProperties}
         className={cn(
           "flex-col bg-surface",
@@ -286,7 +303,9 @@ export function CopilotPanel({
           <FirstProject />
         ) : (
           <>
-            <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-live="polite">
+            <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+              {/* Announce finished replies once instead of re-reading every streamed token. */}
+              <p className="sr-only" aria-live="polite">{!streaming && all.at(-1)?.role === "assistant" ? "The copilot replied." : ""}</p>
               {all.length === 0 ? (
                 <div className="flex h-full flex-col justify-end gap-3 pb-2">
                   <div className="px-1">
@@ -342,20 +361,32 @@ export function CopilotPanel({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize the copilot"
+          aria-valuemin={MIN_WIDTH}
+          aria-valuemax={MAX_WIDTH}
+          aria-valuenow={width}
+          tabIndex={0}
           onPointerDown={startResize}
-          className="absolute inset-y-0 -right-1 hidden w-2 cursor-col-resize hover:bg-brand-tea/50 lg:block"
+          onKeyDown={(e) => {
+            const step = e.key === "ArrowRight" ? 16 : e.key === "ArrowLeft" ? -16 : 0;
+            if (!step) return;
+            e.preventDefault();
+            setStoredWidth(String(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width + step))));
+          }}
+          className="absolute inset-y-0 -right-1 hidden w-2 cursor-col-resize outline-none hover:bg-brand-tea/50 focus-visible:bg-brand-teal/60 lg:block"
         />
       </aside>
 
-      {!mobileOpen && (
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          className="fixed bottom-5 right-5 z-40 flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-bold text-on-primary shadow-lg lg:hidden"
-        >
-          <Sparkles className="size-4" aria-hidden /> Copilot
-        </button>
-      )}
+      {/* Stays mounted while the sheet is open so focus can return to it. */}
+      <button
+        ref={fab}
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        hidden={mobileOpen}
+        aria-haspopup="dialog"
+        className="fixed bottom-5 right-5 z-40 flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-bold text-on-primary shadow-lg lg:hidden"
+      >
+        <Sparkles className="size-4" aria-hidden /> Copilot
+      </button>
     </>
   );
 }

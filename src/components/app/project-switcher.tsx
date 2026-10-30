@@ -35,6 +35,7 @@ export function ProjectSwitcher({
   const [query, setQuery] = useState("");
   const [pending, start] = useTransition();
   const [switching, setSwitching] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const listId = useId();
   const current = projects.find((p) => p.id === currentId) ?? null;
@@ -55,11 +56,14 @@ export function ProjectSwitcher({
   function pick(id: string) {
     if (id === currentId) return setOpen(false);
     setSwitching(id);
+    setError(null);
     start(async () => {
       const res = await switchProjectAction(id);
       setSwitching(null);
+      // Keep the menu open on failure so the reason is visible.
+      if (!res.ok) return setError(res.error);
       setOpen(false);
-      if (res.ok) router.refresh();
+      router.refresh();
     });
   }
 
@@ -68,8 +72,11 @@ export function ProjectSwitcher({
     <div ref={root} className={cn("relative", className)}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
+        onClick={() => {
+          setError(null);
+          setOpen((o) => !o);
+        }}
+        aria-haspopup="true"
         aria-expanded={open}
         aria-controls={listId}
         aria-label={`Project: ${current?.name ?? "none"}. Switch project`}
@@ -102,11 +109,13 @@ export function ProjectSwitcher({
               className="mb-1 min-h-10 w-full rounded-xl border border-border px-3 text-sm focus-visible:border-accent focus-visible:outline-none"
             />
           )}
-          <ul id={listId} role="listbox" aria-label="Projects" className="max-h-72 overflow-y-auto">
+          <ul id={listId} aria-label="Projects" className="max-h-72 overflow-y-auto">
             {shown.map((p) => (
-              <li key={p.id} role="option" aria-selected={p.id === currentId}>
+              <li key={p.id}>
                 <button
                   type="button"
+                  autoFocus={projects.length <= 6 && p.id === (currentId ?? shown[0]?.id)}
+                  aria-current={p.id === currentId || undefined}
                   onClick={() => pick(p.id)}
                   disabled={pending}
                   className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2 text-left text-sm font-semibold hover:bg-primary-soft disabled:opacity-60"
@@ -119,6 +128,7 @@ export function ProjectSwitcher({
             ))}
             {!shown.length && <li className="px-3 py-2 text-sm text-muted-foreground">No match</li>}
           </ul>
+          {error && <p role="alert" className="px-2 py-1.5 text-xs text-destructive">{error}</p>}
           <div className="mt-1 border-t border-border pt-1">
             <Link href="/projects/new" onClick={() => setOpen(false)} className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 text-sm font-semibold hover:bg-primary-soft">
               <span className="grid size-7 place-items-center rounded-lg bg-primary-soft text-primary"><Plus className="size-4" aria-hidden /></span>
