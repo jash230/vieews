@@ -2,6 +2,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { Film, ImageIcon } from "lucide-react";
 import Link from "next/link";
 import type { PostWithTargets } from "@/lib/posts/service";
+import { PostRowItem } from "./deleted-posts";
 import { PlatformIcon } from "./platform";
 import { PostMenu } from "./post-menu";
 import { StatusBadge } from "./status";
@@ -18,7 +19,7 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
     ? `Scheduled for ${format(new Date(post.scheduled_for), "EEE d MMM, h:mm a")}`
     : formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   return (
-    <li className="flex items-center pr-2 transition-colors duration-150 hover:bg-primary-soft/60">
+    <PostRowItem postId={post.id} className="flex items-center pr-2 transition-colors duration-150 hover:bg-primary-soft/60">
       <Link href={`/posts/${post.id}`} className="group flex min-w-0 flex-1 items-center gap-4 py-3.5 pl-5 pr-2">
         <div className="relative aspect-[9/16] w-11 shrink-0 overflow-hidden rounded-lg bg-muted transition-transform duration-200 ease-spring group-hover:-rotate-3 group-hover:scale-105">
           {thumbUrl ? (
@@ -47,6 +48,6 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
         <StatusBadge status={post.status} className="shrink-0" />
       </Link>
       <PostMenu post={post} />
-    </li>
+    </PostRowItem>
   );
 }

@@ -3,8 +3,9 @@
 import { Ban, RotateCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useTransition } from "react";
+import { deletePostNow } from "@/components/app/deleted-posts";
 import { Button } from "@/components/ui/button";
-import { cancelPostAction, deletePostAction, retryTargetAction } from "../../actions";
+import { cancelPostAction, retryTargetAction } from "../../actions";
 
 /** Re-fetches the server component while publishing is in progress. */
 export function AutoRefresh({ everyMs = 5000 }: { everyMs?: number }) {
@@ -37,18 +38,14 @@ export function CancelPostButton({ postId }: { postId: string }) {
 
 export function DeletePostButton({ postId }: { postId: string }) {
   const router = useRouter();
-  const [pending, start] = useTransition();
   return (
     <Button
       variant="secondary"
-      loading={pending}
       onClick={() => {
         if (!confirm("Delete this post from Vieews? Anything already posted stays live on the platforms.")) return;
-        start(async () => {
-          const res = await deletePostAction(postId);
-          if (res.ok) router.push("/posts");
-          else alert(res.error);
-        });
+        // Leave first: actions and navigations share one queue, so pushing after would wait for the delete.
+        router.push("/posts");
+        deletePostNow(postId);
       }}
     >
       <Trash2 aria-hidden /> Delete

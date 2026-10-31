@@ -1,18 +1,14 @@
 "use client";
 
 import { MoreHorizontal, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
-import { deletePostAction } from "@/app/(app)/actions";
-import { Loader } from "@/components/ui/loader";
+import { useEffect, useRef, useState } from "react";
 import { canDeletePost } from "@/lib/posts/deletable";
 import type { PostRow } from "@/lib/types";
+import { deletePostNow } from "./deleted-posts";
 
 /** The "..." menu at the end of a post row. */
 export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "updated_at"> }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [pending, start] = useTransition();
   const root = useRef<HTMLDivElement>(null);
   const deletable = canDeletePost(post);
 
@@ -30,12 +26,8 @@ export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "upda
 
   function remove() {
     if (!confirm("Delete this post from Vieews? Anything already posted stays live on the platforms.")) return;
-    start(async () => {
-      const res = await deletePostAction(post.id);
-      setOpen(false);
-      if (!res.ok) return void alert(res.error);
-      router.refresh();
-    });
+    setOpen(false);
+    deletePostNow(post.id);
   }
 
   return (
@@ -48,7 +40,7 @@ export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "upda
         aria-label="Post options"
         className="grid size-11 place-items-center rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground"
       >
-        {pending ? <Loader variant="dots" size={14} label={null} /> : <MoreHorizontal className="size-5" aria-hidden />}
+        <MoreHorizontal className="size-5" aria-hidden />
       </button>
       {open && (
         <div role="menu" className="absolute right-0 z-50 mt-1 w-56 animate-pop-in rounded-2xl border border-border bg-background p-1.5 shadow-lg">
@@ -56,12 +48,12 @@ export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "upda
             type="button"
             role="menuitem"
             onClick={remove}
-            disabled={!deletable || pending}
+            disabled={!deletable}
             className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 text-left text-sm font-semibold text-destructive hover:bg-destructive-soft disabled:text-muted-foreground disabled:hover:bg-transparent"
           >
             <Trash2 className="size-4" aria-hidden /> Delete post
           </button>
-          {!deletable && <p className="px-3 pb-2 text-xs text-muted-foreground">Can't delete while it's publishing.</p>}
+          {!deletable && <p className="px-3 pb-2 text-xs text-muted-foreground">Can&apos;t delete while it&apos;s publishing.</p>}
         </div>
       )}
     </div>
