@@ -7,7 +7,7 @@ import { createMediaAsset, createSignedUpload, createSignedUploadUrl, finalizeMe
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import type { CreatePostInput } from "@/lib/posts/schema";
-import { cancelPost, createPost, PostValidationError, retryTarget } from "@/lib/posts/service";
+import { cancelPost, createPost, deletePost, PostValidationError, retryTarget } from "@/lib/posts/service";
 
 export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -59,6 +59,13 @@ export async function cancelPostAction(postId: string) {
   return run(async (userId) => {
     await cancelPost(userId, postId);
     revalidatePath(`/posts/${postId}`);
+    revalidatePath("/posts");
+  });
+}
+
+export async function deletePostAction(postId: string) {
+  return run(async (userId) => {
+    await deletePost(userId, postId);
     revalidatePath("/posts");
   });
 }

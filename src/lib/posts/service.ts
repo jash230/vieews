@@ -115,6 +115,18 @@ export async function cancelPost(userId: string, postId: string) {
   await inngest.send({ name: EVENTS.postCanceled, data: { postId } });
 }
 
+/**
+ * Removes the post from Vieews (its targets cascade; the media stays in the library).
+ * Doesn't take anything down from the platforms it already went out to.
+ */
+export async function deletePost(userId: string, postId: string) {
+  const post = await getPost(userId, postId);
+  if (post.status === "publishing") throw new Error("This post is still publishing. Wait for it to finish, then delete it.");
+  if (post.status === "scheduled") await inngest.send({ name: EVENTS.postCanceled, data: { postId } });
+  const { error } = await supabaseAdmin().from("posts").delete().eq("user_id", userId).eq("id", postId);
+  if (error) throw error;
+}
+
 export async function retryTarget(userId: string, targetId: string) {
   const db = supabaseAdmin();
   const { data: target, error } = await db.from("post_targets").select("*").eq("user_id", userId).eq("id", targetId).single();

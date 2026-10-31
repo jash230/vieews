@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/app/status";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { signedReadUrl } from "@/lib/media/service";
 import { getPost, type PostWithTargets } from "@/lib/posts/service";
-import { AutoRefresh, CancelPostButton, RetryButton } from "./post-actions";
+import { AutoRefresh, CancelPostButton, DeletePostButton, RetryButton } from "./post-actions";
 
 export const metadata = { title: "Post" };
 
@@ -38,7 +38,10 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
           <h1 className="font-display text-[28px] font-semibold tracking-tight">Post details</h1>
           <StatusBadge status={post.status} />
         </div>
-        {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
+          {!inFlight && <DeletePostButton postId={post.id} />}
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
