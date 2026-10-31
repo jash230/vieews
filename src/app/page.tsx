@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { ArrowRight, Bot, CalendarClock, UploadCloud } from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Logo } from "@/components/app/logo";
@@ -12,6 +13,12 @@ const FEATURES = [
   { icon: UploadCloud, title: "Upload once", body: "Drop a Reel, Short or TikTok. Vieews checks it against each platform's rules before you post.", tile: "bg-brand-tea/60" },
   { icon: CalendarClock, title: "Post now or later", body: "Publish instantly or pick a time. Track every platform's result in one place.", tile: "bg-brand-olive/45" },
   { icon: Bot, title: "AI-ready", body: "A built-in MCP server lets Claude upload and schedule posts for you.", tile: "bg-brand-teal/35" },
+];
+
+// TikTok's app review wants both visible on the site without opening a menu.
+const LEGAL = [
+  { href: "/privacy", label: "Privacy Policy" },
+  { href: "/terms", label: "Terms of Service" },
 ];
 
 // The column widens on laptops and desktops so the page doesn't sit in a narrow strip.
@@ -99,6 +106,19 @@ export default function Home() {
           </ButtonLink>
         </section>
       </main>
+
+      <footer className="relative border-t border-border bg-surface">
+        <div className={`flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-muted-foreground ${SHELL}`}>
+          <p>© 2026 Vieews</p>
+          <nav aria-label="Legal" className="flex flex-wrap gap-1 font-semibold">
+            {LEGAL.map(({ href, label }) => (
+              <Link key={href} href={href} className="flex min-h-11 items-center rounded-xl px-3 transition-colors hover:bg-primary-soft hover:text-foreground">
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      </footer>
     </div>
   );
 }
