@@ -2,11 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import { format } from "date-fns";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
 import { StatusBadge } from "@/components/app/status";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { signedReadUrl } from "@/lib/media/service";
+import { canDeletePost } from "@/lib/posts/deletable";
 import { getPost, type PostWithTargets } from "@/lib/posts/service";
 import { AutoRefresh, CancelPostButton, DeletePostButton, RetryButton } from "./post-actions";
 
@@ -23,7 +24,8 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
   const { userId } = await auth.protect();
   const { id } = await params;
   const post = await getPost(userId, id).catch(() => null);
-  if (!post) notFound();
+  // Deleted (or never ours): back to the list rather than a 404, since deleting re-renders this page.
+  if (!post) redirect("/posts");
   const mediaUrl = post.media ? await signedReadUrl(post.media.storage_path).catch(() => null) : null;
   const inFlight = post.status === "publishing";
 
@@ -40,7 +42,7 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
-          {!inFlight && <DeletePostButton postId={post.id} />}
+          {canDeletePost(post) && <DeletePostButton postId={post.id} />}
         </div>
       </div>
 

@@ -3,6 +3,7 @@ import { Film, ImageIcon } from "lucide-react";
 import Link from "next/link";
 import type { PostWithTargets } from "@/lib/posts/service";
 import { PlatformIcon } from "./platform";
+import { PostMenu } from "./post-menu";
 import { StatusBadge } from "./status";
 
 const DOT: Record<string, string> = {
@@ -17,8 +18,8 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
     ? `Scheduled for ${format(new Date(post.scheduled_for), "EEE d MMM, h:mm a")}`
     : formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   return (
-    <li>
-      <Link href={`/posts/${post.id}`} className="group flex items-center gap-4 px-5 py-3.5 transition-colors duration-150 hover:bg-primary-soft/60">
+    <li className="flex items-center pr-2 transition-colors duration-150 hover:bg-primary-soft/60">
+      <Link href={`/posts/${post.id}`} className="group flex min-w-0 flex-1 items-center gap-4 py-3.5 pl-5 pr-2">
         <div className="relative aspect-[9/16] w-11 shrink-0 overflow-hidden rounded-lg bg-muted transition-transform duration-200 ease-spring group-hover:-rotate-3 group-hover:scale-105">
           {thumbUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -45,6 +46,7 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
         </ul>
         <StatusBadge status={post.status} className="shrink-0" />
       </Link>
+      <PostMenu post={post} />
     </li>
   );
 }

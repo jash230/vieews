@@ -4,6 +4,7 @@ import { validateTarget, type ValidationIssue } from "@/lib/platforms/limits";
 import { getMediaAsset } from "@/lib/media/service";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow, PostRow, PostStatus, PostTargetRow, SocialAccountRow } from "@/lib/types";
+import { canDeletePost } from "./deletable";
 import { createPostSchema, type CreatePostInput } from "./schema";
 
 export class PostValidationError extends Error {
@@ -121,7 +122,7 @@ export async function cancelPost(userId: string, postId: string) {
  */
 export async function deletePost(userId: string, postId: string) {
   const post = await getPost(userId, postId);
-  if (post.status === "publishing") throw new Error("This post is still publishing. Wait for it to finish, then delete it.");
+  if (!canDeletePost(post)) throw new Error("This post is still publishing. Wait for it to finish, then delete it.");
   if (post.status === "scheduled") await inngest.send({ name: EVENTS.postCanceled, data: { postId } });
   const { error } = await supabaseAdmin().from("posts").delete().eq("user_id", userId).eq("id", postId);
   if (error) throw error;
