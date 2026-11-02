@@ -184,7 +184,14 @@ export async function listPosts(
   let q = supabaseAdmin().from("posts").select(POST_SELECT).eq("user_id", userId);
   if (opts.projectId) q = q.eq("project_id", opts.projectId);
   if (opts.range) {
-    const { from, to } = opts.range;
+    // Normalized to ISO timestamps because they're spliced into the filter string; anything else can't add filter syntax.
+    const iso = (s: string) => {
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) throw new Error(`Invalid date: ${s}`);
+      return d.toISOString();
+    };
+    const from = iso(opts.range.from);
+    const to = iso(opts.range.to);
     q = q.or(`and(scheduled_for.gte."${from}",scheduled_for.lt."${to}"),and(scheduled_for.is.null,created_at.gte."${from}",created_at.lt."${to}")`);
   }
   if (opts.status?.length) q = q.in("status", opts.status);
