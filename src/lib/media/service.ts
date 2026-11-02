@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { signToken, verifyToken } from "@/lib/crypto";
+import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsage } from "@/lib/media/cleanup";
 import { env } from "@/lib/env";
 import { readCapped, safeFetch } from "@/lib/net/safe-fetch";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
@@ -167,4 +168,39 @@ export async function importMediaFromUrl(userId: string, sourceUrl: string, maxB
   const { error } = await supabaseAdmin().storage.from(MEDIA_BUCKET).upload(asset.storage_path, body, { contentType: mime, upsert: true });
   if (error) throw error;
   return finalizeMediaAsset(userId, asset.id);
+}
+
+/**
+ * Frees storage (Supabase's free plan has 1 GB): deletes the stored file once every post using it is
+ * done. The media row and its thumbnail stay so the post history still renders. Returns how many.
+ */
+export async function purgeFinishedMedia(): Promise<number> {
+  const db = supabaseAdmin();
+  const { data: assets } = await db
+    .from("media_assets")
+    .select("id, storage_path, status, created_at")
+    .is("purged_at", null)
+    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString())
+    .order("created_at")
+    .limit(500);
+  if (!assets?.length) return 0;
+  const { data: links } = await db
+    .from("post_media")
+    .select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)")
+    .in("media_asset_id", assets.map((a) => a.id));
+  // Covers of posts made before post_media existed.
+  const { data: covers } = await db
+    .from("posts")
+    .select("status, published_at, updated_at, media_asset_id")
+    .in("media_asset_id", assets.map((a) => a.id));
+  const usage = new Map<string, PostUsage[]>();
+  const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
+  for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
+  for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
+
+  const purgeable = assets.filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  for (const asset of purgeable) {
+    await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
+  }
+  return purgeable.length;
 }

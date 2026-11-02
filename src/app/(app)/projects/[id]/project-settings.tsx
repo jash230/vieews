@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/form";
 import { Notice } from "@/components/ui/misc";
+import { toast } from "@/components/ui/toast";
 import type { ProjectKit } from "@/lib/projects/kit";
 import type { ProjectMediaRole } from "@/lib/projects/service";
 import type { MediaKind, PublicAccount } from "@/lib/types";
@@ -34,29 +35,44 @@ interface Props {
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
 const commas = (s: string) => s.split(",").map((l) => l.trim().replace(/^#/, "")).filter(Boolean);
 
-/** Saves a section and shows its own result next to its button. */
-function useSave() {
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * A section's form state that follows the server. When the saved value changes (a save in this
+ * section, or the copilot editing the project) the form takes it, unless that would overwrite
+ * edits you haven't saved. Other sections' saves don't touch it.
+ */
+function useSynced<T>(server: T, key: (v: T) => unknown = (v) => v) {
+  const [value, setValue] = useState(server);
+  const [synced, setSynced] = useState(server);
+  if (!same(key(server), key(synced))) {
+    setSynced(server);
+    if (same(key(value), key(synced)) || same(key(value), key(server))) setValue(server);
+  }
+  return [value, setValue] as const;
+}
+
+/** Saves a section: a toast on success, the error next to its button on failure. */
+function useSave(success: string) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const save = (fn: () => Promise<ActionResult<unknown>>) =>
     start(async () => {
       const res = await fn();
-      setResult(res.ok ? { ok: true, message: "Saved" } : { ok: false, message: res.error });
-      if (res.ok) router.refresh();
+      setError(res.ok ? null : res.error);
+      if (!res.ok) return;
+      toast.success(success);
+      router.refresh();
     });
-  return { pending, result, save };
+  return { pending, error, save };
 }
 
-function SaveRow({ pending, result, label = "Save" }: { pending: boolean; result: { ok: boolean; message: string } | null; label?: string }) {
+function SaveRow({ pending, error, label = "Save" }: { pending: boolean; error: string | null; label?: string }) {
   return (
     <div className="flex items-center gap-3 pt-2">
       <Button type="submit" loading={pending}>{label}</Button>
-      {result && (
-        <p role={result.ok ? "status" : "alert"} className={cn("text-sm", result.ok ? "text-success" : "text-destructive")}>
-          {result.message}
-        </p>
-      )}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
@@ -79,7 +95,7 @@ export function ProjectSettings({ project, media, accounts, linked }: Props) {
 function KitForm({ project }: { project: Props["project"] }) {
   const id = useId();
   const k = project.kit;
-  const [f, setF] = useState({
+  const [f, setF] = useSynced({
     name: project.name,
     storeUrl: project.storeUrl ?? "",
     oneLiner: k.oneLiner,
@@ -96,7 +112,7 @@ function KitForm({ project }: { project: Props["project"] }) {
     notes: project.notes,
   });
   const set = (key: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [key]: e.target.value });
-  const { pending, result, save } = useSave();
+  const { pending, error, save } = useSave("Project details saved");
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -174,7 +190,7 @@ function KitForm({ project }: { project: Props["project"] }) {
             <Textarea id={`${id}-notes`} value={f.notes} onChange={set("notes")} className="min-h-20" />
           </Field>
           <div className="sm:col-span-2">
-            <SaveRow pending={pending} result={result} />
+            <SaveRow pending={pending} error={error} />
           </div>
         </form>
       </CardBody>
@@ -184,11 +200,12 @@ function KitForm({ project }: { project: Props["project"] }) {
 
 function ScreensEditor({ projectId, initial }: { projectId: string; initial: MediaItem[] }) {
   const id = useId();
-  const [items, setItems] = useState(initial);
+  // Compared without `url`: signed URLs change on every refresh, and fresh uploads show a local preview.
+  const [items, setItems] = useSynced(initial, (list) => list.map((m) => ({ ...m, url: null })));
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const { pending, result, save } = useSave();
+  const { pending, error, save } = useSave("Images saved");
 
   const update = (mediaId: string, patch: Partial<MediaItem>) => setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, ...patch } : m)));
   const moveUp = (index: number) =>
@@ -297,7 +314,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
               })}
             </ul>
           )}
-          <SaveRow pending={pending} result={result} label="Save images" />
+          <SaveRow pending={pending} error={error} label="Save images" />
         </form>
       </CardBody>
     </Card>
@@ -305,14 +322,10 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
 }
 
 function AccountsPicker({ projectId, accounts, linked }: { projectId: string; accounts: PublicAccount[]; linked: string[] }) {
-  const [selected, setSelected] = useState(() => new Set(linked));
-  const { pending, result, save } = useSave();
+  const [selected, setSelected] = useSynced([...linked].sort());
+  const { pending, error, save } = useSave("Accounts updated");
   const toggle = (accountId: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(accountId)) next.add(accountId);
-      return next;
-    });
+    setSelected((prev) => (prev.includes(accountId) ? prev.filter((x) => x !== accountId) : [...prev, accountId].sort()));
 
   return (
     <Card>
@@ -326,7 +339,7 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            save(() => setProjectAccountsAction(projectId, [...selected]));
+            save(() => setProjectAccountsAction(projectId, selected));
           }}
           className="space-y-3"
         >
@@ -339,7 +352,7 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
               {accounts.map((a) => (
                 <li key={a.id}>
                   <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 has-[:checked]:border-primary has-[:checked]:bg-primary-soft">
-                    <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggle(a.id)} className="size-4 accent-[var(--color-primary)]" />
+                    <input type="checkbox" checked={selected.includes(a.id)} onChange={() => toggle(a.id)} className="size-4 accent-[var(--color-primary)]" />
                     <PlatformBadge platform={a.platform} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold">{a.display_name ?? a.username}</span>
@@ -353,7 +366,7 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
             </ul>
           )}
           <a href="/accounts" className="inline-block text-sm font-semibold text-primary hover:underline">Connect another account</a>
-          <SaveRow pending={pending} result={result} />
+          <SaveRow pending={pending} error={error} />
         </form>
       </CardBody>
     </Card>
@@ -381,6 +394,7 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
             start(async () => {
               const res = await deleteProjectAction(projectId);
               if (!res.ok) return setError(res.error);
+              toast.success(`Deleted ${name}`);
               router.push("/projects");
             });
           }}

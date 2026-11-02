@@ -7,6 +7,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { switchProjectAction } from "@/app/(app)/actions";
 import { ProjectIcon } from "@/app/(app)/projects/project-icon";
 import { Loader } from "@/components/ui/loader";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 export interface ProjectOption {
@@ -59,7 +60,10 @@ export function ProjectSwitcher({
       const res = await switchProjectAction(id);
       setSwitching(null);
       setOpen(false);
-      if (res.ok) router.refresh();
+      const name = projects.find((p) => p.id === id)?.name ?? "the project";
+      if (!res.ok) return void toast.error(`Couldn't switch to ${name}`, { description: res.error });
+      toast.success(`Switched to ${name}`);
+      router.refresh();
     });
   }
 

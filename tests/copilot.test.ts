@@ -65,6 +65,13 @@ describe("copilot history", () => {
     expect(toApiMessages(rows).map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant", "user"]);
   });
 
+  it("answers a tool call that was cut off before its result was saved", () => {
+    const call = { id: "call", role: "assistant" as const, created_at: "", parts: { content: [{ type: "tool_use" as const, id: "t1", name: "list_posts", input: {} }] } };
+    const messages = toApiMessages([user("a"), call, user("next")]);
+    expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "user"]);
+    expect(messages[2].content).toEqual([expect.objectContaining({ type: "tool_result", tool_use_id: "t1", is_error: true })]);
+  });
+
   it("drops the declined attempt's thinking and tool calls before a fallback", () => {
     const content = [
       { type: "thinking" },

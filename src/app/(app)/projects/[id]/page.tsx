@@ -44,7 +44,7 @@ async function ProjectContent({ params, searchParams }: PageProps<"/projects/[id
       )}
       {gaps.length > 0 && <Notice className="mb-6">Still missing: {gaps.join(", ")}.</Notice>}
       <ProjectSettings
-        key={project.updated_at}
+        key={project.id}
         project={{ id: project.id, name: project.name, storeUrl: project.store_url, notes: project.notes, kit: project.kit }}
         media={media.map((m) => ({ id: m.media_asset_id, role: m.role, shows: m.shows, tags: m.tags, url: m.url, kind: m.media.kind }))}
         accounts={accounts}

@@ -15,23 +15,28 @@ const NAV = [
   { href: "/settings", label: "AI & API keys", icon: KeyRound },
 ] as const;
 
-/** The workspace's tabs, in the top bar. Scrolls sideways on narrow screens. */
-export function NavTabs({ className }: { className?: string }) {
+type TabsProps = { className?: string; vertical?: boolean };
+
+/** The workspace's tabs: a column in the sidebar, or a row that scrolls sideways on phones. */
+export function NavTabs(props: TabsProps) {
   // The pathname is only known at request time; render inactive tabs until it streams in.
   return (
-    <Suspense fallback={<TabList pathname={null} className={className} />}>
-      <ActiveTabList className={className} />
+    <Suspense fallback={<TabList pathname={null} {...props} />}>
+      <ActiveTabList {...props} />
     </Suspense>
   );
 }
 
-function ActiveTabList({ className }: { className?: string }) {
-  return <TabList pathname={usePathname()} className={className} />;
+function ActiveTabList(props: TabsProps) {
+  return <TabList pathname={usePathname()} {...props} />;
 }
 
-function TabList({ pathname, className }: { pathname: string | null; className?: string }) {
+function TabList({ pathname, className, vertical = false }: TabsProps & { pathname: string | null }) {
   return (
-    <nav aria-label="Main" className={cn("flex min-w-0 gap-1 overflow-x-auto [scrollbar-width:none]", className)}>
+    <nav
+      aria-label="Main"
+      className={cn("flex min-w-0 gap-1", vertical ? "flex-col overflow-y-auto" : "overflow-x-auto [scrollbar-width:none]", className)}
+    >
       {NAV.map(({ href, label, icon: Icon }) => {
         const active = !!pathname && (pathname === href || pathname.startsWith(`${href}/`));
         return (
@@ -47,7 +52,15 @@ function TabList({ pathname, className }: { pathname: string | null; className?:
             <Icon className="size-4 group-hover:animate-wiggle" aria-hidden />
             {label}
             <PendingDots />
-            {active && <span className="absolute inset-x-3 -bottom-[7px] h-1 animate-pop-in rounded-full bg-brand-olive" aria-hidden />}
+            {active && (
+              <span
+                className={cn(
+                  "absolute animate-pop-in rounded-full bg-brand-olive",
+                  vertical ? "inset-y-2.5 -left-1 w-1" : "inset-x-3 -bottom-[7px] h-1",
+                )}
+                aria-hidden
+              />
+            )}
           </Link>
         );
       })}

@@ -212,6 +212,18 @@ export async function projectsByAccount(userId: string): Promise<Record<string, 
   return out;
 }
 
+/**
+ * For the composer: active accounts that post for this project, plus active ones that post for
+ * no project at all (connected without being linked), so they can be added instead of vanishing.
+ */
+export function composeAccounts(accounts: PublicAccount[], byAccount: Record<string, { id: string }[]>, projectId: string) {
+  const active = accounts.filter((a) => a.status === "active");
+  return {
+    linked: active.filter((a) => byAccount[a.id]?.some((p) => p.id === projectId)),
+    unassigned: active.filter((a) => !byAccount[a.id]?.length),
+  };
+}
+
 export async function listProjectMedia(userId: string, projectId: string): Promise<ProjectMediaItem[]> {
   await assertProjectOwner(userId, projectId);
   const { data, error } = await supabaseAdmin()

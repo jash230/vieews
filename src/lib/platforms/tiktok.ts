@@ -20,12 +20,18 @@ export interface TikTokCreatorInfo {
   maxVideoPostDurationSec: number;
 }
 
+// TikTok's own message for these codes doesn't say what to do.
+const TT_ERRORS: Record<string, string> = {
+  unaudited_client_can_only_post_to_private_accounts:
+    "TikTok hasn't audited Vieews yet, so it only accepts posts from private accounts. In the TikTok app, turn on Settings and privacy → Privacy → Private account, then post with “Only me”.",
+};
+
 async function ttJson(res: Response, what: string) {
   const json = await res.json().catch(() => ({}));
   const code = json.error?.code;
   if (!res.ok || (code && code !== "ok")) {
     const retryable = res.status >= 500 || res.status === 429 || code === "rate_limit_exceeded";
-    throw new PlatformError(`${what} failed: ${json.error?.message || code || res.status}`, {
+    throw new PlatformError(`${what} failed: ${TT_ERRORS[code] || json.error?.message || code || res.status}`, {
       retryable,
       status: res.status,
       reauth: code === "access_token_invalid" || res.status === 401,

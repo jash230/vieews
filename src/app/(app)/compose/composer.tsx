@@ -1,19 +1,21 @@
 "use client";
 
-import { AlertCircle, ArrowUp, CalendarClock, CheckCircle2, Film, ImagePlus, Info, RefreshCw, Send, UploadCloud, X } from "lucide-react";
+import { format } from "date-fns";
+import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Film, ImagePlus, Info, RefreshCw, Send, Shrink, UploadCloud, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { PlatformBadge, PlatformIcon, PLATFORM_META } from "@/components/app/platform";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
 import { Notice } from "@/components/ui/misc";
+import { toast } from "@/components/ui/toast";
 import { CAPTION_MAX, LIMITS, SUPPORTED_MIME, isVertical, validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
 import type { TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import { MAX_CAROUSEL_ITEMS, type CreatePostInput } from "@/lib/posts/schema";
 import type { InstagramOptions, Platform, PublicAccount, TargetOptions, TikTokOptions, YouTubeOptions } from "@/lib/types";
 import { cn, formatBytes, formatDuration } from "@/lib/utils";
-import { createPostAction, tiktokCreatorInfoAction } from "../actions";
+import { addProjectAccountAction, createPostAction, tiktokCreatorInfoAction } from "../actions";
 import { readMediaMeta, useMediaUploads, type UploadItem } from "./media";
 
 const ACCEPT = [...SUPPORTED_MIME.video, ...SUPPORTED_MIME.image].join(",");
@@ -30,14 +32,94 @@ function toLocalInput(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const noopSubscribe = () => () => {};
+
 /** Scheduling needs at least a minute of lead time. */
-function isTooSoon(localValue: string) {
-  return new Date(localValue).getTime() < Date.now() + 60_000;
+function isTooSoon(localValue: string, now = Date.now()) {
+  return new Date(localValue).getTime() < now + 60_000;
 }
 
-function Section({ step, title, description, children }: { step: number; title: string; description?: string; children: React.ReactNode }) {
+// Sections the blocker list links to. One composer per page, so fixed ids are fine.
+const SECTION = { media: "compose-media", accounts: "compose-accounts", caption: "compose-caption", settings: "compose-settings", when: "compose-when" };
+// Media problems link to platform settings: that's where each platform's explanation is shown.
+const FIELD_SECTION: Record<ValidationIssue["field"], string> = { media: SECTION.settings, caption: SECTION.caption, title: SECTION.settings, options: SECTION.settings };
+
+const PRESETS = [
+  { key: "hour", label: "In 1 hour" },
+  { key: "tonight", label: "Tonight, 7 PM" },
+  { key: "tomorrow", label: "Tomorrow, 9 AM" },
+  { key: "custom", label: "Pick a time" },
+] as const;
+type Preset = (typeof PRESETS)[number]["key"];
+
+function presetTime(key: Exclude<Preset, "custom">, now: number) {
+  if (key === "hour") return new Date(now + 60 * 60 * 1000);
+  const d = new Date(now);
+  if (key === "tomorrow") d.setDate(d.getDate() + 1);
+  d.setHours(key === "tonight" ? 19 : 9, 0, 0, 0);
+  return d;
+}
+
+/** "Israel Standard Time" rather than "Asia/Jerusalem". */
+function timeZoneLabel() {
+  const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: "long" }).formatToParts(new Date());
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+/**
+ * Quick picks over the native date-time input, which shows for "Pick a time". The input is kept
+ * in here so a calendar picker can replace it. `now` is the parent's clock, refreshed on every touch.
+ */
+function ScheduleField({ id, value, onChange, now, onTouch }: { id: string; value: string; onChange: (v: string) => void; now: number; onTouch: () => void }) {
+  const [preset, setPreset] = useState<Preset>(
+    () => PRESETS.find((p) => p.key !== "custom" && toLocalInput(presetTime(p.key, now)) === value)?.key ?? "custom",
+  );
+  const [zone] = useState(timeZoneLabel);
+  // "Tonight" is gone once 7 PM is less than a minute away.
+  const visible = PRESETS.filter((p) => p.key !== "tonight" || !isTooSoon(toLocalInput(presetTime("tonight", now)), now));
+  const tooSoon = !!value && isTooSoon(value, now);
+
+  function pick(key: Preset, at: number) {
+    onTouch();
+    setPreset(key);
+    if (key !== "custom") onChange(toLocalInput(presetTime(key, at)));
+  }
+
   return (
-    <Card>
+    <div className="space-y-3">
+      <fieldset>
+        <legend className="sr-only">Quick picks</legend>
+        <div className="flex flex-wrap gap-2">
+          {visible.map((p) => (
+            <label
+              key={p.key}
+              className={cn(
+                "flex min-h-10 items-center rounded-full border px-3.5 text-sm font-semibold transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                preset === p.key ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
+              )}
+            >
+              <input type="radio" name={`${id}-preset`} className="sr-only" checked={preset === p.key} onChange={() => pick(p.key, Date.now())} />
+              {p.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      {preset === "custom" ? (
+        <Field id={id} label="Date and time" hint={`Your time zone: ${zone}`} error={tooSoon ? "Pick a time at least a minute from now." : null}>
+          <Input id={id} type="datetime-local" value={value} min={toLocalInput(new Date(now))} onFocus={onTouch} onChange={(e) => (onTouch(), onChange(e.target.value))} />
+        </Field>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Posts <span className="font-semibold text-foreground">{value ? format(new Date(value), "EEE d MMM, h:mm a") : ""}</span>, {zone}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Section({ id, step, title, description, children }: { id: string; step: number; title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <Card id={id} className="scroll-mt-6">
       <CardHeader className="flex-nowrap">
         <div className="flex items-start gap-3">
           <span className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-xs font-bold text-background tabular-nums">{step}</span>
@@ -58,7 +140,9 @@ function MediaRow({
   landscape,
   onRemove,
   onMoveUp,
+  onMoveDown,
   onRetry,
+  onShrink,
 }: {
   item: UploadItem;
   /** 1-based place in a carousel, or null for a single file. */
@@ -66,7 +150,9 @@ function MediaRow({
   landscape: boolean;
   onRemove: () => void;
   onMoveUp?: () => void;
+  onMoveDown?: () => void;
   onRetry: () => void;
+  onShrink: () => void;
 }) {
   const { file, meta, state, previewUrl } = item;
   const isImage = file.type.startsWith("image/");
@@ -114,12 +200,40 @@ function MediaRow({
               </Button>
             </div>
           )}
+          {state.status === "too-big" && (
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-destructive"><AlertCircle className="size-3.5" aria-hidden />File too big</p>
+                {isImage ? (
+                  <span className="text-xs text-muted-foreground">Use a photo under 50 MB.</span>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={onShrink}>
+                    <Shrink aria-hidden /> Shrink
+                  </Button>
+                )}
+              </div>
+              {state.error && <p className="text-xs text-destructive">{state.error}</p>}
+            </div>
+          )}
+          {state.status === "shrinking" && (
+            <div className="flex items-center gap-3">
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(state.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Shrinking ${file.name}`}>
+                <div className="stripes h-full animate-stripes rounded-full bg-primary transition-[width] duration-300" style={{ width: `${state.progress * 100}%` }} />
+              </div>
+              <span className="text-xs font-semibold tabular-nums text-muted-foreground">Shrinking {Math.round(state.progress * 100)}%</span>
+            </div>
+          )}
         </div>
       </div>
-      {onMoveUp && (
-        <button type="button" onClick={onMoveUp} aria-label={`Move ${file.name} earlier`} className="grid size-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
-          <ArrowUp className="size-5" aria-hidden />
-        </button>
+      {position && (
+        <div className="flex shrink-0 flex-col">
+          <button type="button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`Move photo ${position} earlier`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+            <ArrowUp className="size-4" aria-hidden />
+          </button>
+          <button type="button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`Move photo ${position} later`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+            <ArrowDown className="size-4" aria-hidden />
+          </button>
+        </div>
       )}
       <button type="button" onClick={onRemove} aria-label={`Remove ${file.name}`} className="grid size-11 shrink-0 place-items-center rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground">
         <X className="size-5" aria-hidden />
@@ -128,18 +242,31 @@ function MediaRow({
   );
 }
 
-export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; projectId: string }) {
+export function Composer({
+  accounts,
+  unassigned,
+  projectId,
+  initialAt,
+}: {
+  accounts: PublicAccount[];
+  /** Connected accounts that post for no project yet; offered with an Add button. */
+  unassigned: PublicAccount[];
+  projectId: string;
+  initialAt?: string;
+}) {
   const router = useRouter();
   const ids = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const { items, add: addUploads, remove: removeUpload, moveUp, retry: retryUpload } = useMediaUploads();
+  const { items, add: addUploads, remove: removeUpload, moveUp, retry: retryUpload, shrink: shrinkUpload } = useMediaUploads();
   const cover = items[0] ?? null;
   const isCarousel = items.length > 1;
   const isPhotos = !!cover && cover.file.type.startsWith("image/");
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set(accounts.map((a) => a.id)));
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [adding, startAdding] = useTransition();
   const [caption, setCaption] = useState("");
   const [captionTab, setCaptionTab] = useState<"all" | Platform>("all");
   const [overrides, setOverrides] = useState<Partial<Record<Platform, string>>>({});
@@ -159,26 +286,52 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
   const [commercial, setCommercial] = useState(false);
   const [creatorInfo, setCreatorInfo] = useState<Record<string, TikTokCreatorInfo | { error: string }>>({});
 
-  const [when, setWhen] = useState<"now" | "later">("now");
-  const [scheduleAt, setScheduleAt] = useState(() => toLocalInput(new Date(Date.now() + 60 * 60 * 1000)));
-  const [minSchedule] = useState(() => toLocalInput(new Date()));
+  // The posts calendar links here with ?at= to preset a time.
+  const [presetAt] = useState(() => {
+    const at = initialAt ? new Date(initialAt) : null;
+    return at && !Number.isNaN(at.getTime()) ? at : null;
+  });
+  const [when, setWhen] = useState<"now" | "later">(presetAt ? "later" : "now");
+  const [scheduleAt, setScheduleAt] = useState(() => toLocalInput(presetAt ?? new Date(Date.now() + 60 * 60 * 1000)));
+  // Local times depend on the browser's zone, so the schedule field only renders after hydration.
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
+  // The clock scheduling checks against. Refreshed whenever the time is touched, so render stays pure.
+  const [clock, setClock] = useState(() => Date.now());
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const publishCard = useRef<HTMLElement>(null);
+  const [publishVisible, setPublishVisible] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, startSubmit] = useTransition();
   const [submitted, setSubmitted] = useState(false);
 
   const selectedAccounts = accounts.filter((a) => selected.has(a.id));
+
+  function addAccount(a: PublicAccount) {
+    setAddingId(a.id);
+    startAdding(async () => {
+      const res = await addProjectAccountAction(projectId, a.id);
+      if (!res.ok) {
+        toast.error(`Couldn't add ${a.display_name ?? a.username}`, { description: res.error });
+        return;
+      }
+      // The action revalidates the page; selecting now ticks the account when the new list arrives.
+      setSelected((prev) => new Set(prev).add(a.id));
+    });
+  }
   const platforms = [...new Set(selectedAccounts.map((a) => a.platform))];
   const tiktokAccounts = selectedAccounts.filter((a) => a.platform === "tiktok");
 
-  // TikTok requires showing live creator info before posting.
+  // TikTok requires showing live creator info before posting. Fetch once per account, not once per render.
+  const creatorInfoRequested = useRef(new Set<string>());
   useEffect(() => {
     for (const a of tiktokAccounts) {
-      if (creatorInfo[a.id]) continue;
+      if (creatorInfoRequested.current.has(a.id)) continue;
+      creatorInfoRequested.current.add(a.id);
       tiktokCreatorInfoAction(a.id).then((res) =>
         setCreatorInfo((prev) => ({ ...prev, [a.id]: res.ok ? res.data : { error: res.error } })),
       );
     }
-  }, [tiktokAccounts, creatorInfo]);
+  }, [tiktokAccounts]);
 
   const tiktokInfos = tiktokAccounts.map((a) => creatorInfo[a.id]).filter((i): i is TikTokCreatorInfo => !!i && !("error" in i));
   const tiktokPrivacyOptions = tiktokInfos.length
@@ -190,6 +343,15 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
     duet: tiktokInfos.some((i) => i.duetDisabled),
     stitch: tiktokInfos.some((i) => i.stitchDisabled),
   };
+
+  // The sticky bar on smaller screens steps aside while the real publish card is on screen.
+  useEffect(() => {
+    const el = publishCard.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(([entry]) => setPublishVisible(entry.isIntersecting), { threshold: 0.4 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Warn before leaving with unsaved work.
   useEffect(() => {
@@ -255,7 +417,8 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
   const mediaInfo = mediaInfos[0] ?? null;
   const meta = cover?.meta ?? null;
   const uploaded = items.length > 0 && items.every((i) => i.state.status === "done");
-  const uploading = items.some((i) => i.state.status === "uploading");
+  const uploading = items.some((i) => i.state.status === "uploading" || i.state.status === "shrinking");
+  const tooBig = items.some((i) => i.state.status === "too-big");
 
   const optionsFor = (platform: Platform): TargetOptions =>
     platform === "youtube"
@@ -270,16 +433,32 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
     ? platforms.flatMap((p) => validateMedia(mediaInfos, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
     : [];
 
-  const extraBlockers: string[] = [];
-  if (commercial && !tt.brandOrganic && !tt.brandedContent && platforms.includes("tiktok")) extraBlockers.push("TikTok: choose what kind of commercial content this is.");
-  if (when === "later" && !scheduleAt) extraBlockers.push("Pick a date and time.");
-  if (tiktokAccounts.some((a) => !creatorInfo[a.id])) extraBlockers.push("Loading TikTok account settings…");
+  // Everything stopping the post, each pointing at the section that fixes it.
+  const blockers: { message: string; target: string }[] = [];
+  if (selectedAccounts.length === 0) blockers.push({ message: "Pick at least one account.", target: SECTION.accounts });
+  for (const i of issues) blockers.push({ message: `${PLATFORM_META[i.platform].label}: ${i.message}`, target: FIELD_SECTION[i.field] });
+  if (commercial && !tt.brandOrganic && !tt.brandedContent && platforms.includes("tiktok")) {
+    blockers.push({ message: "TikTok: choose what kind of commercial content this is.", target: SECTION.settings });
+  }
+  if (when === "later" && !scheduleAt) blockers.push({ message: "Pick a date and time.", target: SECTION.when });
+  else if (when === "later" && isTooSoon(scheduleAt, clock)) blockers.push({ message: "Pick a time at least a minute from now.", target: SECTION.when });
+  if (tiktokAccounts.some((a) => !creatorInfo[a.id])) blockers.push({ message: "Loading TikTok account settings…", target: SECTION.settings });
   for (const a of tiktokAccounts) {
     const info = creatorInfo[a.id];
-    if (info && "error" in info) extraBlockers.push(`TikTok: ${info.error}`);
+    if (info && "error" in info) blockers.push({ message: `TikTok: ${info.error}`, target: SECTION.settings });
   }
 
-  const canSubmit = uploaded && selectedAccounts.length > 0 && issues.length === 0 && extraBlockers.length === 0 && !submitting;
+  const canSubmit = uploaded && blockers.length === 0 && !submitting;
+  // Why Publish is off before there's anything to check.
+  const waitReason = !items.length
+    ? "Add a video or photos to get started."
+    : uploading
+      ? "You can publish once the upload finishes."
+      : tooBig
+        ? "Shrink or remove the file that's too big."
+        : !uploaded
+        ? "Retry or remove the upload that failed."
+        : null;
 
   function submit() {
     const assetIds = items.flatMap((i) => (i.state.status === "done" ? [i.state.assetId] : []));
@@ -307,6 +486,8 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
         return;
       }
       setSubmitted(true);
+      if (when === "later") toast.success("Post scheduled", { description: format(new Date(scheduleAt), "EEEE d MMMM, h:mm a") });
+      else toast.success("Publishing now", { description: "Follow each platform's progress on the post page." });
       router.push(`/posts/${res.data.postId}`);
     });
   }
@@ -316,12 +497,26 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
   const activeCaption = captionTab === "all" ? caption : overrides[captionTab] ?? caption;
   const captionMax = captionTab === "all" ? Math.min(...(platforms.length ? platforms.map((p) => CAPTION_MAX[p]) : [2200])) : CAPTION_MAX[captionTab];
   const vertical = mediaInfo ? isVertical(mediaInfo) : true;
+  const shownIndex = Math.min(previewIndex, Math.max(items.length - 1, 0));
+  const shown = items[shownIndex] ?? null;
+  const previewCaption = captionFor(captionTab === "all" ? platforms[0] ?? "instagram" : captionTab);
+  const captionTabs = ["all", ...platforms] as const;
+
+  function onTabKey(e: React.KeyboardEvent) {
+    const at = captionTabs.indexOf(captionTab);
+    const next = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: captionTabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const tab = captionTabs[(next + captionTabs.length) % captionTabs.length];
+    setCaptionTab(tab);
+    document.getElementById(`${ids}-tab-${tab}`)?.focus();
+  }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="min-w-0 space-y-6">
         {/* 1. Media */}
-        <Section step={1} title="Media" description="One vertical 9:16 video, or several photos for a swipeable carousel (TikTok and Instagram).">
+        <Section id={SECTION.media} step={1} title="Media" description="One vertical 9:16 video, or several photos for a swipeable carousel (TikTok and Instagram).">
           <input
             ref={fileInput}
             id={`${ids}-file`}
@@ -369,7 +564,9 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
                     landscape={!isVertical(mediaInfos[index])}
                     onRemove={() => removeUpload(item.key)}
                     onMoveUp={index > 0 ? () => moveUp(item.key) : undefined}
+                    onMoveDown={index < items.length - 1 ? () => moveUp(items[index + 1].key) : undefined}
                     onRetry={() => retryUpload(item)}
+                    onShrink={() => shrinkUpload(item)}
                   />
                 ))}
               </ol>
@@ -384,7 +581,7 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
         </Section>
 
         {/* 2. Accounts */}
-        <Section step={2} title="Post to" description="Pick one or more accounts.">
+        <Section id={SECTION.accounts} step={2} title="Post to" description="Pick one or more accounts.">
           <fieldset>
             <legend className="sr-only">Accounts</legend>
             <div className="flex flex-wrap gap-2">
@@ -419,30 +616,49 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
               })}
             </div>
           </fieldset>
+          {unassigned.map((a) => (
+            <div key={a.id} className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border-strong px-3 py-2 text-sm text-muted-foreground">
+              <PlatformBadge platform={a.platform} className="size-8" />
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold text-foreground">{a.display_name ?? a.username}</span> on {PLATFORM_META[a.platform].label} is connected but doesn&rsquo;t post for this project.
+              </span>
+              <Button type="button" size="sm" variant="secondary" loading={adding && addingId === a.id} disabled={adding} onClick={() => addAccount(a)}>
+                Add
+              </Button>
+            </div>
+          ))}
           {selectedAccounts.length === 0 && <p className="mt-3 text-sm text-destructive" role="alert">Pick at least one account.</p>}
         </Section>
 
         {/* 3. Caption */}
-        <Section step={3} title="Caption" description="Write once, or tailor it per platform.">
+        <Section id={SECTION.caption} step={3} title="Caption" description="Write once, or tailor it per platform.">
           {platforms.length > 1 && (
-            <div role="tablist" aria-label="Caption per platform" className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
-              {(["all", ...platforms] as const).map((tab) => (
+            <div role="tablist" aria-label="Caption per platform" onKeyDown={onTabKey} className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
+              {captionTabs.map((tab) => (
                 <button
                   key={tab}
+                  id={`${ids}-tab-${tab}`}
                   role="tab"
                   type="button"
                   aria-selected={captionTab === tab}
+                  aria-controls={`${ids}-caption-panel`}
+                  tabIndex={captionTab === tab ? 0 : -1}
                   onClick={() => setCaptionTab(tab)}
                   className={cn(
                     "flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
                     captionTab === tab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{overrides[tab] !== undefined && <span className="size-1.5 rounded-full bg-primary" aria-label="customized" />}</>}
+                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{overrides[tab] !== undefined && <><span className="size-1.5 rounded-full bg-primary" aria-hidden /><span className="sr-only">(customized)</span></>}</>}
                 </button>
               ))}
             </div>
           )}
+          <div
+            id={`${ids}-caption-panel`}
+            role={platforms.length > 1 ? "tabpanel" : undefined}
+            aria-labelledby={platforms.length > 1 ? `${ids}-tab-${captionTab}` : undefined}
+          >
           <Field
             id={`${ids}-caption`}
             label={captionTab === "all" ? "Caption" : `${PLATFORM_META[captionTab].label} caption`}
@@ -475,11 +691,12 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
               Use the shared caption
             </Button>
           )}
+          </div>
         </Section>
 
         {/* 4. Platform settings */}
         {platforms.length > 0 && (
-          <Section step={4} title="Platform settings">
+          <Section id={SECTION.settings} step={4} title="Platform settings">
             <div className="divide-y divide-border [&>*]:py-6 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
               {platforms.includes("youtube") && (
                 <div className="space-y-4">
@@ -619,31 +836,53 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
       {/* Preview + publish */}
       <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
         <div className="mx-auto w-full max-w-[13rem] rounded-[2.25rem] sm:max-w-[17rem] border-[6px] border-foreground bg-foreground shadow-lg">
-          <div className={cn("relative overflow-hidden rounded-[1.75rem] bg-muted-foreground", vertical ? "aspect-[9/16]" : "aspect-[9/16] flex items-center")}>
-            {cover && !isPhotos && (
-              <video src={cover.previewUrl} controls playsInline muted loop className="size-full object-contain" aria-label="Preview" />
+          {/* Always a 9:16 phone screen; landscape media letterboxes, as it does on the platforms. */}
+          <div className="relative aspect-[9/16] overflow-hidden rounded-[1.75rem] bg-muted-foreground">
+            {shown && !isPhotos && (
+              <video src={shown.previewUrl} controls playsInline muted loop className="size-full object-contain" aria-label="Preview" />
             )}
-            {cover && isPhotos && (
+            {shown && isPhotos && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={cover.previewUrl} alt="Preview of the cover photo" className="size-full object-contain" />
+              <img src={shown.previewUrl} alt={`Preview of photo ${shownIndex + 1}`} className="size-full object-contain" />
             )}
             {isCarousel && (
-              <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white tabular-nums">1/{items.length}</span>
+              <>
+                <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white tabular-nums" aria-live="polite">
+                  {shownIndex + 1}/{items.length}
+                </span>
+                {([[-1, ChevronLeft, "Previous photo", "left-2"], [1, ChevronRight, "Next photo", "right-2"]] as const).map(([step, Icon, label, side]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-label={label}
+                    disabled={shownIndex + step < 0 || shownIndex + step >= items.length}
+                    onClick={() => setPreviewIndex(shownIndex + step)}
+                    className={cn("absolute top-1/2 z-10 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white transition-opacity hover:bg-black/70 disabled:opacity-0", side)}
+                  >
+                    <Icon className="size-5" aria-hidden />
+                  </button>
+                ))}
+                <div className="absolute inset-x-0 bottom-3 z-10 flex justify-center gap-1.5" aria-hidden>
+                  {items.map((item, i) => (
+                    <span key={item.key} className={cn("size-1.5 rounded-full transition-colors", i === shownIndex ? "bg-white" : "bg-white/45")} />
+                  ))}
+                </div>
+              </>
             )}
             {!cover && (
               <div className="grid size-full place-items-center text-center text-sm font-semibold text-brand-tea">
                 <span className="px-6">Your preview shows up here</span>
               </div>
             )}
-            {cover && caption && (
+            {shown && previewCaption && (
               <p className="pointer-events-none absolute inset-x-0 bottom-0 line-clamp-3 bg-gradient-to-t from-black/70 to-transparent px-4 pb-14 pt-10 text-[13px] leading-snug text-white">
-                {captionFor(captionTab === "all" ? platforms[0] ?? "instagram" : captionTab)}
+                {previewCaption}
               </p>
             )}
           </div>
         </div>
 
-        <Card>
+        <Card id={SECTION.when} ref={publishCard} className="scroll-mt-6">
           <CardBody className="space-y-4">
             <fieldset>
               <legend className="mb-2 text-sm font-medium">When</legend>
@@ -656,23 +895,26 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
                       when === value ? "border-primary bg-primary-soft text-primary" : "border-border text-muted-foreground hover:border-border-strong",
                     )}
                   >
-                    <input type="radio" name={`${ids}-when`} className="sr-only" checked={when === value} onChange={() => setWhen(value)} />
+                    <input type="radio" name={`${ids}-when`} className="sr-only" checked={when === value} onChange={() => (setWhen(value), setClock(Date.now()))} />
                     <Icon className="size-4" aria-hidden />
                     {label}
                   </label>
                 ))}
               </div>
             </fieldset>
-            {when === "later" && (
-              <Field id={`${ids}-at`} label="Date and time" hint={`Your time zone (${Intl.DateTimeFormat().resolvedOptions().timeZone})`}>
-                <Input id={`${ids}-at`} type="datetime-local" value={scheduleAt} min={minSchedule} onChange={(e) => setScheduleAt(e.target.value)} />
-              </Field>
+            {when === "later" && hydrated && (
+              <ScheduleField id={`${ids}-at`} value={scheduleAt} onChange={setScheduleAt} now={clock} onTouch={() => setClock(Date.now())} />
             )}
 
-            {(issues.length > 0 || extraBlockers.length > 0) && items.length > 0 && (
+            {blockers.length > 0 && items.length > 0 && (
               <ul className="space-y-1.5 rounded-xl bg-warning-soft px-4 py-3 text-sm text-warning" aria-live="polite">
-                {[...issues.map((i) => `${PLATFORM_META[i.platform].label}: ${i.message}`), ...extraBlockers].map((m) => (
-                  <li key={m} className="flex gap-2"><Info className="mt-0.5 size-4 shrink-0" aria-hidden />{m}</li>
+                {blockers.map((b) => (
+                  <li key={b.message}>
+                    <a href={`#${b.target}`} className="flex gap-2 underline-offset-2 hover:underline">
+                      <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+                      {b.message}
+                    </a>
+                  </li>
                 ))}
               </ul>
             )}
@@ -682,11 +924,35 @@ export function Composer({ accounts, projectId }: { accounts: PublicAccount[]; p
               {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
               {when === "now" ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}` : "Schedule post"}
             </Button>
-            {uploading && <p className="text-center text-xs text-muted-foreground">You can publish once the upload finishes.</p>}
-            {!items.length && <p className="text-center text-xs text-muted-foreground">Add a video or photos to get started.</p>}
+            {waitReason && <p className="text-center text-xs text-muted-foreground">{waitReason}</p>}
           </CardBody>
         </Card>
       </aside>
+
+      {/* Below xl the publish card sits at the very bottom, so keep the action in reach while scrolling. */}
+      <div
+        className={cn(
+          "sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-border bg-background/90 px-4 py-3 backdrop-blur-md transition-[translate,opacity] duration-200 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10 xl:hidden",
+          publishVisible && "pointer-events-none translate-y-full opacity-0",
+        )}
+        aria-hidden={publishVisible || undefined}
+      >
+        <p className="min-w-0 flex-1 text-sm">
+          {waitReason ? (
+            <span className="text-muted-foreground">{waitReason}</span>
+          ) : blockers.length ? (
+            <a href={`#${blockers[0].target}`} className="block truncate font-semibold text-warning underline-offset-2 hover:underline">
+              {blockers.length === 1 ? "1 thing to fix" : `${blockers.length} things to fix`}: {blockers[0].message}
+            </a>
+          ) : (
+            <span className="font-semibold text-success">Ready to {when === "now" ? "publish" : "schedule"}</span>
+          )}
+        </p>
+        <Button size="sm" disabled={!canSubmit} loading={submitting} onClick={submit} tabIndex={publishVisible ? -1 : undefined}>
+          {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
+          {when === "now" ? "Publish" : "Schedule"}
+        </Button>
+      </div>
     </div>
   );
 }

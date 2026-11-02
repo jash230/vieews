@@ -2,13 +2,15 @@ import { auth } from "@clerk/nextjs/server";
 import { format } from "date-fns";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
 import { StatusBadge } from "@/components/app/status";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { signedReadUrls } from "@/lib/media/service";
+import { canDeletePost } from "@/lib/posts/deletable";
+import { healStalledPost } from "@/lib/posts/publish";
 import { getPost, type PostWithTargets } from "@/lib/posts/service";
-import { AutoRefresh, CancelPostButton, RetryButton } from "./post-actions";
+import { AutoRefresh, CancelPostButton, DeletePostButton, PostVideo, RetryButton } from "./post-actions";
 
 export const metadata = { title: "Post" };
 
@@ -28,16 +30,18 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
   const { userId } = await auth.protect();
   const { id } = await params;
   const post = await getPost(userId, id).catch(() => null);
-  if (!post) notFound();
+  // Deleted (or never ours): back to the list rather than a 404, since deleting re-renders this page.
+  if (!post) redirect("/posts");
   const live = post.items.filter((m) => !m.purged_at);
   const urls = await signedReadUrls(live.map((m) => m.storage_path)).catch(() => ({}) as Record<string, string>);
   const mediaUrl = post.media && !post.media.purged_at ? urls[post.media.storage_path] ?? null : null;
   const photos = post.items.every((m) => m.kind === "image") ? post.items.length : 0;
   const inFlight = post.status === "publishing";
+  healStalledPost(post);
 
   return (
     <>
-      {inFlight && <AutoRefresh />}
+      {inFlight && <AutoRefresh postId={post.id} />}
       <Link href="/posts" className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> All posts
       </Link>
@@ -46,14 +50,17 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
           <h1 className="font-display text-[28px] font-semibold tracking-tight">Post details</h1>
           <StatusBadge status={post.status} />
         </div>
-        {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
+          {canDeletePost(post) && <DeletePostButton postId={post.id} />}
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)]">
         <Card className="h-fit overflow-hidden">
           <div className="relative aspect-[9/16] bg-slate-900">
             {mediaUrl && post.media?.kind === "video" && (
-              <video src={mediaUrl} controls playsInline preload="metadata" className="size-full object-contain" aria-label="Post video" />
+              <PostVideo src={mediaUrl} />
             )}
             {mediaUrl && post.media?.kind === "image" && (
               // eslint-disable-next-line @next/next/no-img-element

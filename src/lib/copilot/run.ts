@@ -44,6 +44,8 @@ function friendlyError(err: unknown): string {
 export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
   const { userId, projectId } = input;
   try {
+    // Fails before the message is saved when the copilot isn't set up, so it isn't left unanswered.
+    const client = anthropic();
     const project = await getProject(userId, projectId);
 
     const ids = [...new Set(input.attachments)].slice(0, MAX_ATTACHMENTS);
@@ -86,7 +88,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
     const messages = toApiMessages(await loadRows(userId, projectId));
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const stream = anthropic().beta.messages.stream(
+      const stream = client.beta.messages.stream(
         {
           model: MODELS.copilot,
           max_tokens: 16000,

@@ -8,7 +8,7 @@ import { approveProposal, declineProposal } from "@/lib/copilot/proposals";
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import type { CreatePostInput } from "@/lib/posts/schema";
-import { cancelPost, createPost, PostValidationError, retryTarget } from "@/lib/posts/service";
+import { cancelPost, createPost, deletePost, postProgress, PostValidationError, retryTarget } from "@/lib/posts/service";
 import { createProjectFromLink } from "@/lib/projects/create-from-link";
 import { setCurrentProjectCookie } from "@/lib/projects/current";
 import {
@@ -16,6 +16,7 @@ import {
   createProject,
   defaultProject,
   deleteProject,
+  linkAccountToProject,
   setProjectAccounts,
   setProjectMedia,
   updateProject,
@@ -77,6 +78,18 @@ export async function cancelPostAction(postId: string) {
   });
 }
 
+export async function deletePostAction(postId: string) {
+  return run(async (userId) => {
+    await deletePost(userId, postId);
+    revalidatePath("/posts");
+  });
+}
+
+/** A cheap fingerprint of where publishing stands; the post page re-renders only when it changes. */
+export async function postProgressAction(postId: string) {
+  return run((userId) => postProgress(userId, postId));
+}
+
 export async function retryTargetAction(postId: string, targetId: string) {
   return run(async (userId) => {
     await retryTarget(userId, targetId);
@@ -130,6 +143,15 @@ export async function updateProjectAction(projectId: string, patch: Pick<Project
 export async function setProjectAccountsAction(projectId: string, accountIds: string[]) {
   return run(async (userId) => {
     await setProjectAccounts(userId, projectId, accountIds);
+    revalidateApp();
+  });
+}
+
+/** Adds one of the user's connected accounts to a project, e.g. from the composer. */
+export async function addProjectAccountAction(projectId: string, accountId: string) {
+  return run(async (userId) => {
+    await getAccount(userId, accountId);
+    await linkAccountToProject(userId, projectId, accountId);
     revalidateApp();
   });
 }

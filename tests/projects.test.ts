@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyKit, kitGaps, projectKitSchema } from "@/lib/projects/kit";
-import { slugify, uniqueSlug } from "@/lib/projects/service";
+import { composeAccounts, slugify, uniqueSlug } from "@/lib/projects/service";
+import type { PublicAccount } from "@/lib/types";
 
 describe("project slugs", () => {
   it("turns names into url-safe slugs", () => {
@@ -12,6 +13,27 @@ describe("project slugs", () => {
   it("adds a number when the slug is taken", () => {
     expect(uniqueSlug("tally", [])).toBe("tally");
     expect(uniqueSlug("tally", ["tally", "tally-2"])).toBe("tally-3");
+  });
+});
+
+describe("compose accounts", () => {
+  const account = (id: string, platform: PublicAccount["platform"], status: PublicAccount["status"] = "active") => ({ id, platform, status }) as PublicAccount;
+  const ig = account("ig", "instagram");
+  const tt = account("tt", "tiktok");
+  const yt = account("yt", "youtube");
+
+  it("offers connected accounts that post for no project instead of hiding them", () => {
+    // TikTok was connected by a callback that didn't link it to any project.
+    const { linked, unassigned } = composeAccounts([ig, tt], { ig: [{ id: "p1" }] }, "p1");
+    expect(linked).toEqual([ig]);
+    expect(unassigned).toEqual([tt]);
+  });
+
+  it("leaves out accounts another project uses and ones that need reconnecting", () => {
+    const expired = account("old", "tiktok", "needs_reauth");
+    const { linked, unassigned } = composeAccounts([ig, yt, expired], { ig: [{ id: "p1" }], yt: [{ id: "p2" }] }, "p1");
+    expect(linked).toEqual([ig]);
+    expect(unassigned).toEqual([]);
   });
 });
 

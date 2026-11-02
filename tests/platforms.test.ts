@@ -213,4 +213,23 @@ describe("TikTok", () => {
     const { ctx } = fakeCtx({ options: { platform: "tiktok", tiktok: { ...opts, privacyLevel: "PUBLIC_TO_EVERYONE" } } });
     await expect(tiktok.publish(ctx)).rejects.toMatchObject({ opts: { retryable: false } });
   });
+
+  it("explains what to do when TikTok blocks an unaudited app", async () => {
+    mockFetch([
+      [/creator_info/, () => ok(creator)],
+      [
+        /video\/init/,
+        () =>
+          json(
+            { error: { code: "unaudited_client_can_only_post_to_private_accounts", message: "Please review our integration guidelines at https://developers.tiktok.com/doc/content-sharing-guidelines/" } },
+            { status: 403 },
+          ),
+      ],
+    ]);
+    const { ctx } = fakeCtx({ options: { platform: "tiktok", tiktok: { ...opts, privacyLevel: "PUBLIC_TO_EVERYONE" } } });
+    const err = await tiktok.publish(ctx).catch((e) => e);
+    expect(err.message).toMatch(/private/i);
+    expect(err.message).toMatch(/Only me/);
+    expect(err.opts.retryable).toBe(false);
+  });
 });

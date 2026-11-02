@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isTooBig } from "@/lib/media/shrink-plan";
 import { finishUploadAction, startUploadAction } from "../actions";
+import { shrinkVideo } from "./shrink";
 
 export interface MediaMeta {
   width: number | null;
@@ -56,7 +58,17 @@ export type UploadState =
   | { status: "idle" }
   | { status: "uploading"; progress: number }
   | { status: "done"; assetId: string }
-  | { status: "error"; error: string };
+  | { status: "error"; error: string }
+  /** Over the storage upload limit; a video can be shrunk in the browser. `error` is a failed shrink. */
+  | { status: "too-big"; error?: string }
+  | { status: "shrinking"; progress: number };
+
+/** Storage refused the file for its size. */
+class FileTooBigError extends Error {
+  constructor() {
+    super("File too big. Uploads can be up to 50 MB.");
+  }
+}
 
 /** PUTs a file to a Supabase signed upload URL, reporting progress. */
 function putToSignedUrl(url: string, body: Blob, onProgress: (fraction: number) => void, register: (xhr: XMLHttpRequest) => void) {
@@ -75,7 +87,7 @@ function putToSignedUrl(url: string, body: Blob, onProgress: (fraction: number) 
       } catch {
         // Not JSON.
       }
-      reject(new Error(xhr.status === 413 || /maximum allowed size|too large/i.test(message) ? "This file is bigger than your Supabase storage upload limit." : message));
+      reject(xhr.status === 413 || /maximum allowed size|too large/i.test(message) ? new FileTooBigError() : new Error(message));
     };
     xhr.onerror = () => reject(new Error("Upload failed. Check your connection and retry."));
     xhr.onabort = () => reject(new DOMException("Upload canceled", "AbortError"));
@@ -85,6 +97,7 @@ function putToSignedUrl(url: string, body: Blob, onProgress: (fraction: number) 
 
 /** Creates the asset, uploads the file (and optional thumbnail), and marks it ready. Returns the asset id. */
 async function uploadOne(file: File, meta: MediaMeta, onProgress: (fraction: number) => void, register: (xhr: XMLHttpRequest) => void) {
+  if (isTooBig(file.size)) throw new FileTooBigError();
   // The server creates the asset and hands back one-time upload links.
   const started = await startUploadAction({ mime: file.type, sizeBytes: file.size, width: meta.width, height: meta.height, durationS: meta.durationS });
   if (!started.ok) throw new Error(started.error);
@@ -125,14 +138,17 @@ export interface UploadItem {
 export function useMediaUploads() {
   const [items, setItems] = useState<UploadItem[]>([]);
   const xhrs = useRef(new Map<string, XMLHttpRequest>());
+  const shrinks = useRef(new Map<string, AbortController>());
   const previewUrls = useRef(new Set<string>());
 
-  // Stop uploads and free previews when the composer goes away.
+  // Stop uploads and shrinks and free previews when the composer goes away.
   useEffect(() => {
     const open = xhrs.current;
+    const shrinking = shrinks.current;
     const urls = previewUrls.current;
     return () => {
       for (const xhr of open.values()) xhr.abort();
+      for (const controller of shrinking.values()) controller.abort();
       for (const url of urls) URL.revokeObjectURL(url);
     };
   }, []);
@@ -154,6 +170,7 @@ export function useMediaUploads() {
         setState(item.key, { status: "done", assetId });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        if (err instanceof FileTooBigError) return setState(item.key, { status: "too-big" });
         setState(item.key, { status: "error", error: err instanceof Error ? err.message : "Upload failed" });
       } finally {
         xhrs.current.delete(item.key);
@@ -165,14 +182,43 @@ export function useMediaUploads() {
   const add = useCallback(
     (added: Omit<UploadItem, "state">[]) => {
       for (const i of added) previewUrls.current.add(i.previewUrl);
-      setItems((prev) => [...prev, ...added.map((i) => ({ ...i, state: { status: "uploading", progress: 0 } as const }))]);
-      for (const item of added) void start(item);
+      // Files over the limit wait for a shrink instead of uploading only to be refused.
+      const initial = (i: Omit<UploadItem, "state">): UploadState => (isTooBig(i.file.size) ? { status: "too-big" } : { status: "uploading", progress: 0 });
+      setItems((prev) => [...prev, ...added.map((i) => ({ ...i, state: initial(i) }))]);
+      for (const item of added) if (!isTooBig(item.file.size)) void start(item);
     },
     [start],
   );
 
+  /** Re-encodes a too-big video in the browser, swaps it in, and uploads the smaller file. */
+  const shrink = useCallback(
+    async (item: UploadItem) => {
+      const controller = new AbortController();
+      shrinks.current.set(item.key, controller);
+      setState(item.key, { status: "shrinking", progress: 0 });
+      try {
+        const file = await shrinkVideo(item.file, (progress) => setState(item.key, { status: "shrinking", progress }), controller.signal);
+        const previewUrl = URL.createObjectURL(file);
+        previewUrls.current.add(previewUrl);
+        const meta = await readMediaMeta(file, previewUrl);
+        if (controller.signal.aborted) return;
+        URL.revokeObjectURL(item.previewUrl);
+        previewUrls.current.delete(item.previewUrl);
+        setItems((prev) => prev.map((i) => (i.key === item.key ? { ...i, file, previewUrl, meta } : i)));
+        await start({ key: item.key, file, meta });
+      } catch (err) {
+        if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+        setState(item.key, { status: "too-big", error: err instanceof Error ? err.message : "Couldn't shrink this video" });
+      } finally {
+        shrinks.current.delete(item.key);
+      }
+    },
+    [setState, start],
+  );
+
   const remove = useCallback((key: string) => {
     xhrs.current.get(key)?.abort();
+    shrinks.current.get(key)?.abort();
     setItems((prev) => {
       const gone = prev.find((i) => i.key === key);
       if (gone) {
@@ -185,6 +231,7 @@ export function useMediaUploads() {
 
   const clear = useCallback(() => {
     for (const xhr of xhrs.current.values()) xhr.abort();
+    for (const controller of shrinks.current.values()) controller.abort();
     for (const url of previewUrls.current) URL.revokeObjectURL(url);
     previewUrls.current.clear();
     setItems([]);
@@ -203,5 +250,5 @@ export function useMediaUploads() {
 
   const retry = useCallback((item: UploadItem) => void start(item), [start]);
 
-  return { items, add, remove, clear, moveUp, retry };
+  return { items, add, remove, clear, moveUp, retry, shrink };
 }

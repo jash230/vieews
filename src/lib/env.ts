@@ -23,6 +23,8 @@ export const env = {
     clientKey: required("TIKTOK_CLIENT_KEY"),
     clientSecret: required("TIKTOK_CLIENT_SECRET"),
   }),
+  /** Vercel Cron sends it as a bearer token; set it in the project's env vars. */
+  cronSecret: () => process.env.CRON_SECRET ?? null,
   /** Signature file TikTok asks you to host to verify the /media/tt/ URL prefix (photo posts). */
   tiktokUrlVerification: () => {
     const file = process.env.TIKTOK_URL_VERIFICATION_FILE;

@@ -1,8 +1,8 @@
 "use client";
 
-import { Link2, PanelLeftClose, PanelLeftOpen, Sparkles, X } from "lucide-react";
+import { ArrowDown, Link2, PanelRightClose, RotateCw, Sparkles, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { approveProposalAction, createProjectFromLinkAction, declineProposalAction } from "@/app/(app)/actions";
 import { uploadFile } from "@/app/(app)/compose/media";
 import { ProjectSwitcher, type ProjectOption } from "@/components/app/project-switcher";
@@ -12,52 +12,17 @@ import { Loader } from "@/components/ui/loader";
 import type { ChatItem, ChatMessage, CopilotEvent, ProposalView } from "@/lib/copilot/types";
 import { cn } from "@/lib/utils";
 import { ChatInput, type PendingAttachment } from "./chat-input";
+import { COPILOT_PANEL_ID, useCopilotUI, useStored } from "./copilot-ui";
 import { PostApprovalCard, ToolRow } from "./tool-approval";
 
 const WIDTH_KEY = "vieews.copilot.width";
-const COLLAPSED_KEY = "vieews.copilot.collapsed";
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 560;
+const RESIZE_STEP = 16;
+/** How close to the bottom (px) still counts as "following along" for auto-scroll. */
+const STICK_PX = 80;
 
 const SUGGESTIONS = ["What's still missing from my project?", "Write 3 caption ideas for my next post", "What's scheduled this week?"];
-
-const STORED_EVENT = "vieews:stored";
-
-function readStored(key: string): string | null {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-/** A per-browser preference; renders the default on the server and before hydration. */
-function useStored(key: string): [string | null, (value: string) => void] {
-  const value = useSyncExternalStore(
-    (onChange) => {
-      window.addEventListener("storage", onChange);
-      window.addEventListener(STORED_EVENT, onChange);
-      return () => {
-        window.removeEventListener("storage", onChange);
-        window.removeEventListener(STORED_EVENT, onChange);
-      };
-    },
-    () => readStored(key),
-    () => null,
-  );
-  const set = useCallback(
-    (next: string) => {
-      try {
-        window.localStorage.setItem(key, next);
-      } catch {
-        // Storage can be unavailable (private mode); the panel still works.
-      }
-      window.dispatchEvent(new Event(STORED_EVENT));
-    },
-    [key],
-  );
-  return [value, set];
-}
 
 /** Applies one streamed event to the assistant message being built. */
 function applyEvent(items: ChatItem[], event: CopilotEvent): ChatItem[] {
@@ -93,14 +58,17 @@ export function CopilotPanel({
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [deciding, setDeciding] = useState<string | null>(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [storedCollapsed, setStoredCollapsed] = useStored(COLLAPSED_KEY);
+  const { open: mobileOpen, setOpen: setMobileOpen, collapsed, setCollapsed } = useCopilotUI();
+  // Set when a failed send put the message back in the box, so Retry can send it again.
+  const [canRetry, setCanRetry] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const stick = useRef(true);
+  const aside = useRef<HTMLElement>(null);
   const [storedWidth, setStoredWidth] = useStored(WIDTH_KEY);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const streaming = live !== null;
-  const collapsed = storedCollapsed === "1";
   const width = dragWidth ?? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Number(storedWidth) || 384));
 
   // Server data wins whenever it changes (project switch, refresh after an action), except mid-turn.
@@ -108,10 +76,35 @@ export function CopilotPanel({
     if (!abort.current) setMessages(initialMessages);
   }, [initialMessages]);
 
+  // Follow new output only while you're at the bottom; scrolling up to read stays put.
   useEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [messages, live, mobileOpen, collapsed]);
+
+  // The overlay (below lg) behaves like a dialog: focus goes to the input, Escape closes it.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    aside.current?.querySelector<HTMLElement>("textarea, input")?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mobileOpen, setMobileOpen]);
+
+  function onScroll() {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    setAtBottom(stick.current);
+  }
+
+  function jumpToLatest() {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = true;
+    setAtBottom(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
 
   useEffect(() => () => abort.current?.abort(), []);
 
@@ -147,7 +140,10 @@ export function CopilotPanel({
     const ids = attachments.flatMap((a) => (a.state.status === "done" ? [a.state.assetId] : []));
     if (!text.trim() && !ids.length) return;
     setError(null);
+    setCanRetry(false);
     setDraft("");
+    stick.current = true;
+    setAtBottom(true);
     const sentAttachments = attachments;
     setAttachments([]);
     const optimistic: ChatMessage = {
@@ -166,6 +162,9 @@ export function CopilotPanel({
     abort.current = controller;
     let items: ChatItem[] = [];
     let changed = false;
+    // Whether the server has the message; until then a failure can hand it back to you.
+    let received = false;
+    let restored = false;
     try {
       const res = await fetch("/api/copilot", {
         method: "POST",
@@ -187,7 +186,13 @@ export function CopilotPanel({
         buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = JSON.parse(line) as CopilotEvent;
+          let event: CopilotEvent;
+          try {
+            event = JSON.parse(line) as CopilotEvent;
+          } catch {
+            continue; // One garbled line shouldn't end the whole reply.
+          }
+          if (event.type === "user") received = true;
           if (event.type === "user") setMessages((prev) => prev.map((m) => (m.id === optimistic.id ? { ...event.message, items: optimistic.items } : m)));
           else if (event.type === "changed") changed = true;
           else if (event.type === "error") setError(event.message);
@@ -198,12 +203,22 @@ export function CopilotPanel({
         }
       }
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === "AbortError")) setError(err instanceof Error ? err.message : "Something went wrong");
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        setError(err instanceof Error ? err.message : "Something went wrong");
+        if (!received && !items.length) {
+          // Nothing reached the copilot: put the message back so it isn't lost.
+          restored = true;
+          setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+          setDraft(text);
+          setAttachments(sentAttachments);
+          setCanRetry(true);
+        }
+      }
     } finally {
       abort.current = null;
       if (items.length) setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: "assistant", items }]);
       setLive(null);
-      for (const a of sentAttachments) URL.revokeObjectURL(a.previewUrl);
+      if (!restored) for (const a of sentAttachments) URL.revokeObjectURL(a.previewUrl);
       if (changed) router.refresh();
     }
   }
@@ -228,7 +243,7 @@ export function CopilotPanel({
     const startW = width;
     let w = startW;
     const move = (ev: PointerEvent) => {
-      w = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + ev.clientX - startX));
+      w = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW - (ev.clientX - startX)));
       setDragWidth(w);
     };
     const up = () => {
@@ -241,121 +256,156 @@ export function CopilotPanel({
     window.addEventListener("pointerup", up);
   }
 
-  const toggleCollapsed = (value: boolean) => setStoredCollapsed(value ? "1" : "0");
-
   const all = live ? [...messages, { id: "live", role: "assistant" as const, items: live }] : messages;
+  const status = streaming ? "Copilot is replying…" : all.at(-1)?.role === "assistant" ? "Copilot replied." : "";
+
+  function onResizeKey(e: React.KeyboardEvent) {
+    const step = { ArrowLeft: RESIZE_STEP, ArrowRight: -RESIZE_STEP }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    setStoredWidth(String(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width + step))));
+  }
 
   return (
     <>
-      {collapsed && (
-        <div className="hidden w-14 shrink-0 flex-col items-center border-r border-border bg-surface py-3 lg:flex">
-          <button
-            type="button"
-            onClick={() => toggleCollapsed(false)}
-            aria-label="Open the copilot"
-            className="grid size-11 place-items-center rounded-xl bg-primary text-on-primary shadow-pop transition-transform hover:-translate-y-0.5"
-          >
-            <PanelLeftOpen className="size-5" aria-hidden />
-          </button>
-        </div>
-      )}
+      {/* Below lg the copilot is a sheet over a scrim; both slide/fade so closing animates too. */}
+      <div
+        className={cn(
+          "fixed inset-0 z-40 hidden bg-primary/30 backdrop-blur-sm transition-opacity duration-300 md:block lg:hidden",
+          mobileOpen ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+        onClick={() => setMobileOpen(false)}
+        aria-hidden
+      />
 
       <aside
+        ref={aside}
+        id={COPILOT_PANEL_ID}
         aria-label="Copilot"
+        role={mobileOpen ? "dialog" : undefined}
+        aria-modal={mobileOpen || undefined}
+        // Following a link from the chat (e.g. "See the post") should reveal that page.
+        onClickCapture={(e) => mobileOpen && (e.target as HTMLElement).closest("a[href]") && setMobileOpen(false)}
         style={{ "--copilot-w": `${width}px` } as React.CSSProperties}
         className={cn(
-          "flex-col bg-surface",
-          mobileOpen ? "fixed inset-0 z-50 flex sheet-in" : "hidden",
-          !collapsed && "lg:relative lg:z-auto lg:flex lg:w-[var(--copilot-w)] lg:shrink-0 lg:border-r lg:border-border lg:[animation:none]",
+          "flex bg-surface transition-[translate,width,visibility] duration-300 ease-out",
+          // Below md it fills the screen; on tablets it's a side sheet. Either way it slides in from the right.
+          "max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-50 max-lg:w-full max-lg:shadow-lg md:max-lg:w-[26rem] md:max-lg:border-l md:max-lg:border-border",
+          !mobileOpen && "max-lg:invisible max-lg:translate-x-full",
+          // From lg it's docked on the right; collapsing shrinks it toward the edge, so the content slides off-screen.
+          "lg:relative lg:shrink-0 lg:overflow-hidden lg:border-border",
+          collapsed ? "lg:invisible lg:w-0 lg:border-l-0" : "lg:w-[var(--copilot-w)] lg:border-l",
+          dragWidth !== null && "transition-none",
         )}
       >
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
-          <span className="grid size-8 place-items-center rounded-xl bg-brand-tea/70 text-primary"><Sparkles className="size-4" aria-hidden /></span>
-          <h2 className="font-display text-base font-semibold">Copilot</h2>
-          <span className="flex-1" />
-          {project && <ProjectSwitcher projects={projects} currentId={project.id} variant="chip" />}
-          <button type="button" onClick={() => toggleCollapsed(true)} aria-label="Hide the copilot" className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-primary-soft lg:grid">
-            <PanelLeftClose className="size-4" aria-hidden />
-          </button>
-          <button type="button" onClick={() => setMobileOpen(false)} aria-label="Close the copilot" className="grid size-11 place-items-center rounded-lg hover:bg-primary-soft lg:hidden">
-            <X className="size-5" aria-hidden />
-          </button>
-        </header>
-
-        {!project ? (
-          <FirstProject />
-        ) : (
-          <>
-            <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-live="polite">
-              {all.length === 0 ? (
-                <div className="flex h-full flex-col justify-end gap-3 pb-2">
-                  <div className="px-1">
-                    <p className="font-display text-lg font-semibold">Hi! I know {project.name}.</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Ask me to fix its details, or attach a video and tell me where and when to post it.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {SUGGESTIONS.map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => void send(s)}
-                        className="min-h-9 rounded-full border border-border bg-background px-3 text-left text-xs font-semibold text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <ol className="flex flex-col gap-4">
-                  {all.map((m) => (
-                    <li key={m.id} className={cn("flex flex-col gap-1.5", m.role === "user" && "items-end")}>
-                      {m.items.map((item, i) => (
-                        <MessageItem key={i} item={item} role={m.role} deciding={deciding} onDecide={decide} />
-                      ))}
-                      {m.id === "live" && m.items.at(-1)?.kind !== "text" && (
-                        <span className="py-1"><Loader variant="dots" size={16} label="Thinking" /></span>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {error && (
-                <p role="alert" className="mt-3 rounded-xl border border-destructive/25 bg-destructive-soft px-3 py-2 text-sm text-destructive">{error}</p>
-              )}
-            </div>
-            <ChatInput
-              value={draft}
-              onChange={setDraft}
-              onSend={() => void send()}
-              onStop={() => abort.current?.abort()}
-              streaming={streaming}
-              attachments={attachments}
-              onAttach={attach}
-              onRemoveAttachment={removeAttachment}
-              placeholder={`Ask about ${project.name}…`}
-            />
-          </>
-        )}
-
         <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the copilot"
-          onPointerDown={startResize}
-          className="absolute inset-y-0 -right-1 hidden w-2 cursor-col-resize hover:bg-brand-tea/50 lg:block"
-        />
-      </aside>
-
-      {!mobileOpen && (
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          className="fixed bottom-5 right-5 z-40 flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-bold text-on-primary shadow-lg lg:hidden"
+          className="flex h-full min-h-0 w-full flex-col lg:w-[var(--copilot-w)] lg:shrink-0"
         >
-          <Sparkles className="size-4" aria-hidden /> Copilot
-        </button>
-      )}
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
+            <span className="grid size-8 place-items-center rounded-xl bg-brand-tea/70 text-primary"><Sparkles className="size-4" aria-hidden /></span>
+            <h2 className="font-display text-base font-semibold">Copilot</h2>
+            <span className="flex-1" />
+            {project && <ProjectSwitcher projects={projects} currentId={project.id} variant="chip" />}
+            <button type="button" onClick={() => setCollapsed(true)} aria-label="Hide the copilot" className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-primary-soft lg:grid">
+              <PanelRightClose className="size-4" aria-hidden />
+            </button>
+            <button type="button" onClick={() => setMobileOpen(false)} aria-label="Close the copilot" className="grid size-11 place-items-center rounded-lg hover:bg-primary-soft lg:hidden">
+              <X className="size-5" aria-hidden />
+            </button>
+          </header>
+
+          {!project ? (
+            <FirstProject />
+          ) : (
+            <>
+              <p className="sr-only" aria-live="polite">{status}</p>
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+                  {all.length === 0 ? (
+                    <div className="flex h-full flex-col justify-end gap-3 pb-2">
+                      <div className="px-1">
+                        <p className="font-display text-lg font-semibold">Hi! I know {project.name}.</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Ask me to fix its details, or attach a video and tell me where and when to post it.</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {SUGGESTIONS.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => void send(s)}
+                            className="min-h-9 rounded-full border border-border bg-background px-3 text-left text-xs font-semibold text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <ol className="flex flex-col gap-4">
+                      {all.map((m) => (
+                        <li key={m.id} className={cn("flex flex-col gap-1.5", m.role === "user" && "items-end")}>
+                          {m.items.map((item, i) => (
+                            <MessageItem key={i} item={item} role={m.role} deciding={deciding} onDecide={decide} />
+                          ))}
+                          {m.id === "live" && m.items.at(-1)?.kind !== "text" && (
+                            <span className="py-1"><Loader variant="dots" size={16} label="Thinking" /></span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {error && (
+                    <div role="alert" className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive-soft px-3 py-2 text-sm text-destructive">
+                      <p className="min-w-0 flex-1">
+                        {error}
+                        {canRetry && <span className="block text-xs">Your message is back in the box.</span>}
+                      </p>
+                      {canRetry && (
+                        <Button size="sm" variant="secondary" onClick={() => void send()} disabled={streaming}>
+                          <RotateCw aria-hidden /> Retry
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {!atBottom && (
+                  <button
+                    type="button"
+                    onClick={jumpToLatest}
+                    className="absolute bottom-3 left-1/2 flex min-h-9 -translate-x-1/2 animate-pop-in items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-bold text-foreground shadow-md hover:bg-primary-soft"
+                  >
+                    <ArrowDown className="size-3.5" aria-hidden /> Jump to latest
+                  </button>
+                )}
+              </div>
+              <ChatInput
+                value={draft}
+                onChange={setDraft}
+                onSend={() => void send()}
+                onStop={() => abort.current?.abort()}
+                streaming={streaming}
+                attachments={attachments}
+                onAttach={attach}
+                onRemoveAttachment={removeAttachment}
+                placeholder={`Ask about ${project.name}…`}
+              />
+            </>
+          )}
+
+          <div
+            role="separator"
+            tabIndex={0}
+            aria-orientation="vertical"
+            aria-label="Resize the copilot"
+            aria-valuenow={width}
+            aria-valuemin={MIN_WIDTH}
+            aria-valuemax={MAX_WIDTH}
+            onPointerDown={startResize}
+            onKeyDown={onResizeKey}
+            className="absolute inset-y-0 left-0 hidden w-1.5 cursor-col-resize hover:bg-brand-tea/50 focus-visible:bg-brand-tea/70 lg:block"
+          />
+        </div>
+      </aside>
     </>
   );
 }

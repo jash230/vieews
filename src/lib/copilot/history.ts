@@ -54,7 +54,24 @@ export async function appendRow(userId: string, projectId: string, role: "user" 
 export function toApiMessages(rows: MessageRow[]): Anthropic.Beta.BetaMessageParam[] {
   let start = Math.max(0, rows.length - REPLAY_ROWS);
   while (start < rows.length && !(rows[start].role === "user" && rows[start].parts.display)) start++;
-  return rows.slice(start).map((r) => ({ role: r.role, content: r.parts.content }));
+  const kept = rows.slice(start);
+  const messages: Anthropic.Beta.BetaMessageParam[] = [];
+  kept.forEach((r, i) => {
+    messages.push({ role: r.role, content: r.parts.content });
+    if (r.role !== "assistant") return;
+    // A turn cut off between a tool call and its result (a timeout, a crash) would otherwise fail
+    // every later request, so unanswered calls get an error result in their place.
+    const next = kept[i + 1];
+    const answered = new Set(next?.role === "user" ? next.parts.content.flatMap((b) => (b.type === "tool_result" ? [b.tool_use_id] : [])) : []);
+    const missing = r.parts.content.filter((b): b is Anthropic.Beta.BetaToolUseBlockParam => b.type === "tool_use" && !answered.has(b.id));
+    if (missing.length) {
+      messages.push({
+        role: "user",
+        content: missing.map((b) => ({ type: "tool_result" as const, tool_use_id: b.id, content: "Interrupted before it finished.", is_error: true })),
+      });
+    }
+  });
+  return messages;
 }
 
 /**

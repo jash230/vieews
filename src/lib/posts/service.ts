@@ -1,10 +1,11 @@
 import "server-only";
-import { EVENTS, inngest } from "@/lib/inngest/client";
 import { validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
 import { assertProjectOwner, defaultProject, projectAccountIds } from "@/lib/projects/service";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow, PostRow, PostStatus, PostTargetRow, SocialAccountRow } from "@/lib/types";
+import { canDeletePost } from "./deletable";
 import { createPostSchema, mediaIdsOf, type CreatePostInput } from "./schema";
+import { startPublishPost, startRetryTarget } from "./start";
 
 export class PostValidationError extends Error {
   constructor(readonly issues: ValidationIssue[] | string[]) {
@@ -12,6 +13,8 @@ export class PostValidationError extends Error {
     this.name = "PostValidationError";
   }
 }
+
+const START_FAILED = "Couldn't start publishing. Retry in a moment.";
 
 export interface PostWithTargets extends PostRow {
   targets: (PostTargetRow & { account: Pick<SocialAccountRow, "username" | "display_name" | "avatar_url"> | null })[];
@@ -134,7 +137,14 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
     throw tErr;
   }
 
-  await inngest.send({ name: EVENTS.postRequested, data: { postId: post.id } });
+  try {
+    await startPublishPost(post.id);
+  } catch (err) {
+    // Never leave it "publishing" with nothing running: fail it so Retry shows.
+    console.error(err);
+    const { failPendingTargets } = await import("./publish");
+    await failPendingTargets(post.id, START_FAILED);
+  }
   return getPost(userId, post.id);
 }
 
@@ -144,12 +154,39 @@ export async function getPost(userId: string, postId: string): Promise<PostWithT
   return withItems(data as unknown as PostSelectRow);
 }
 
+/** Post and target statuses as one string, e.g. "publishing|uploading,pending". */
+export async function postProgress(userId: string, postId: string): Promise<string> {
+  const { data, error } = await supabaseAdmin()
+    .from("posts")
+    .select("status, targets:post_targets(id, status)")
+    .eq("user_id", userId)
+    .eq("id", postId)
+    .single();
+  if (error || !data) throw new Error("Post not found");
+  const targets = (data.targets as { id: string; status: string }[]).toSorted((a, b) => a.id.localeCompare(b.id));
+  return `${data.status}|${targets.map((t) => t.status).join(",")}`;
+}
+
 export async function listPosts(
   userId: string,
-  opts: { limit?: number; status?: PostStatus[]; upcoming?: boolean; campaign?: string; since?: string; before?: string; projectId?: string } = {},
+  opts: {
+    limit?: number;
+    status?: PostStatus[];
+    upcoming?: boolean;
+    campaign?: string;
+    since?: string;
+    before?: string;
+    projectId?: string;
+    /** Posts that land in [from, to): by scheduled time, or by creation time if posted right away. For the calendar. */
+    range?: { from: string; to: string };
+  } = {},
 ): Promise<PostWithTargets[]> {
   let q = supabaseAdmin().from("posts").select(POST_SELECT).eq("user_id", userId);
   if (opts.projectId) q = q.eq("project_id", opts.projectId);
+  if (opts.range) {
+    const { from, to } = opts.range;
+    q = q.or(`and(scheduled_for.gte."${from}",scheduled_for.lt."${to}"),and(scheduled_for.is.null,created_at.gte."${from}",created_at.lt."${to}")`);
+  }
   if (opts.status?.length) q = q.in("status", opts.status);
   if (opts.campaign) q = q.eq("campaign", opts.campaign);
   if (opts.since) q = q.gte("created_at", opts.since);
@@ -166,7 +203,19 @@ export async function cancelPost(userId: string, postId: string) {
   const db = supabaseAdmin();
   await db.from("posts").update({ status: "canceled" }).eq("id", postId).eq("status", "scheduled");
   await db.from("post_targets").update({ status: "canceled" }).eq("post_id", postId).eq("status", "pending");
-  await inngest.send({ name: EVENTS.postCanceled, data: { postId } });
+  // Its workflow re-reads the post when it wakes at the scheduled time, sees it's canceled and stops.
+}
+
+/**
+ * Removes the post from Vieews (its targets and media links cascade; the media stays in the library).
+ * Doesn't take anything down from the platforms it already went out to.
+ */
+export async function deletePost(userId: string, postId: string) {
+  const post = await getPost(userId, postId);
+  if (!canDeletePost(post)) throw new Error("This post is still publishing. Wait for it to finish, then delete it.");
+  // A scheduled post's workflow wakes up, finds no row and stops.
+  const { error } = await supabaseAdmin().from("posts").delete().eq("user_id", userId).eq("id", postId);
+  if (error) throw error;
 }
 
 export async function retryTarget(userId: string, targetId: string) {
@@ -178,7 +227,14 @@ export async function retryTarget(userId: string, targetId: string) {
   if (post.items.some((m) => m.purged_at)) throw new Error("This post's media was cleaned up to free storage. Create a new post instead.");
   await db.from("post_targets").update({ status: "pending", error: null, finished_at: null }).eq("id", targetId);
   await db.from("posts").update({ status: "publishing" }).eq("id", target.post_id);
-  await inngest.send({ name: EVENTS.targetPublish, data: { targetId, accountId: target.social_account_id } });
+  try {
+    await startRetryTarget(targetId);
+  } catch (err) {
+    console.error(err);
+    const { failTarget } = await import("./publish");
+    await failTarget(targetId, START_FAILED);
+    throw new Error(START_FAILED);
+  }
 }
 
 /** Derives the post status from its targets. */
