@@ -1,12 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { CalendarClock, PenSquare } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { PostRow } from "@/components/app/post-row";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { EmptyState, PageHeader } from "@/components/ui/misc";
+import { EmptyState, PageHeader, Skeleton } from "@/components/ui/misc";
 import { signedReadUrls } from "@/lib/media/service";
 import { listPosts } from "@/lib/posts/service";
+import { NoProject } from "@/components/app/no-project";
+import { getCurrentProject } from "@/lib/projects/current";
 import type { PostStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -20,13 +23,7 @@ const FILTERS: { key: string; label: string; status?: PostStatus[] }[] = [
   { key: "failed", label: "Failed", status: ["failed", "partial"] },
 ];
 
-export default async function PostsPage({ searchParams }: PageProps<"/posts">) {
-  const { userId } = await auth.protect();
-  const sp = await searchParams;
-  const filter = FILTERS.find((f) => f.key === sp.filter) ?? FILTERS[0];
-  const posts = await listPosts(userId, { status: filter.status, upcoming: filter.key === "scheduled", limit: 100 });
-  const thumbs = await signedReadUrls(posts.map((p) => p.media?.thumbnail_path ?? ""));
-
+export default function PostsPage({ searchParams }: PageProps<"/posts">) {
   return (
     <>
       <PageHeader
@@ -34,21 +31,54 @@ export default async function PostsPage({ searchParams }: PageProps<"/posts">) {
         description="Every post and how it did on each platform."
         actions={<ButtonLink href="/compose"><PenSquare aria-hidden /> Create post</ButtonLink>}
       />
-      <nav aria-label="Filter posts" className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-        {FILTERS.map((f) => (
-          <Link
-            key={f.key}
-            href={f.key === "all" ? "/posts" : `/posts?filter=${f.key}`}
-            aria-current={f.key === filter.key ? "page" : undefined}
-            className={cn(
-              "inline-flex min-h-10 shrink-0 items-center rounded-full border px-4 text-sm font-semibold transition-[background-color,border-color,color,translate] duration-200 ease-spring hover:-translate-y-0.5",
-              f.key === filter.key ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
-            )}
-          >
-            {f.label}
-          </Link>
-        ))}
-      </nav>
+      <Suspense fallback={<PostsSkeleton />}>
+        <PostList searchParams={searchParams} />
+      </Suspense>
+    </>
+  );
+}
+
+function FilterNav({ active }: { active: string | null }) {
+  return (
+    <nav aria-label="Filter posts" className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+      {FILTERS.map((f) => (
+        <Link
+          key={f.key}
+          href={f.key === "all" ? "/posts" : `/posts?filter=${f.key}`}
+          aria-current={f.key === active ? "page" : undefined}
+          className={cn(
+            "inline-flex min-h-10 shrink-0 items-center rounded-full border px-4 text-sm font-semibold transition-[background-color,border-color,color,translate] duration-200 ease-spring hover:-translate-y-0.5",
+            f.key === active ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
+          )}
+        >
+          {f.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function PostsSkeleton() {
+  return (
+    <div aria-busy="true">
+      <FilterNav active={null} />
+      <Skeleton className="h-72 rounded-3xl" />
+    </div>
+  );
+}
+
+async function PostList({ searchParams }: Pick<PageProps<"/posts">, "searchParams">) {
+  const { userId } = await auth.protect();
+  const sp = await searchParams;
+  const filter = FILTERS.find((f) => f.key === sp.filter) ?? FILTERS[0];
+  const project = await getCurrentProject(userId);
+  if (!project) return <NoProject />;
+  const posts = await listPosts(userId, { projectId: project.id, status: filter.status, upcoming: filter.key === "scheduled", limit: 100 });
+  const thumbs = await signedReadUrls(posts.map((p) => p.media?.thumbnail_path ?? ""));
+
+  return (
+    <>
+      <FilterNav active={filter.key} />
       <Card>
         {posts.length === 0 ? (
           <EmptyState

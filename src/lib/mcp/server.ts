@@ -7,6 +7,8 @@ import { LIMITS, SUPPORTED_MIME } from "@/lib/platforms/limits";
 import { getCreatorInfo } from "@/lib/platforms/tiktok";
 import { createPostSchema } from "@/lib/posts/schema";
 import { cancelPost, createPost, getPost, listPosts, PostValidationError, retryTarget, type PostWithTargets } from "@/lib/posts/service";
+import { getProject, listProjects } from "@/lib/projects/service";
+import { projectSummary } from "@/lib/projects/summary";
 
 type ToolCtx = { http?: { authInfo?: { extra?: Record<string, unknown> } } };
 
@@ -25,11 +27,15 @@ const fail = (err: unknown) => ({
 function summarizePost(p: PostWithTargets) {
   return {
     id: p.id,
+    project_id: p.project_id,
     status: p.status,
     caption: p.caption,
     scheduled_for: p.scheduled_for,
     created_at: p.created_at,
     source: p.source,
+    campaign: p.campaign,
+    meta: p.meta,
+    media: { kind: p.media?.kind ?? null, items: p.items.length },
     targets: p.targets.map((t) => ({
       id: t.id,
       platform: t.platform,
@@ -53,6 +59,29 @@ function tool<A>(fn: (args: A, userId: string) => Promise<unknown>) {
 }
 
 export function registerTools(server: McpServer) {
+  server.registerTool(
+    "list_projects",
+    {
+      title: "List projects",
+      description: "Lists the user's projects (one per app they promote). Pass a project's id as projectId to create_post and list_posts.",
+      inputSchema: z.object({}),
+    },
+    tool(async (_args: Record<string, never>, userId) =>
+      (await listProjects(userId)).map((p) => ({ id: p.id, name: p.name, store_url: p.store_url, one_liner: p.kit.oneLiner })),
+    ),
+  );
+
+  server.registerTool(
+    "get_project",
+    {
+      title: "Get project",
+      description:
+        "Returns a project's kit (audience, pains, claims ads may and may not make, CTA, brand), its screenshots with signed URLs and what each shows, and the accounts it posts to.",
+      inputSchema: z.object({ projectId: z.string().uuid() }),
+    },
+    tool(async ({ projectId }: { projectId: string }, userId) => projectSummary(userId, await getProject(userId, projectId))),
+  );
+
   server.registerTool(
     "list_accounts",
     {
@@ -145,10 +174,13 @@ export function registerTools(server: McpServer) {
     {
       title: "Create post",
       description: [
-        "Publishes (or schedules, with scheduledFor as an ISO time with offset) one media asset to one or more connected accounts.",
-        "options per target: youtube {title, description?, tags?, privacy: public|unlisted|private};",
-        "instagram {format: reel|post|story, shareToFeed?} (post = single JPEG photo);",
-        "tiktok {privacyLevel (from get_platform_requirements), disableComment, disableDuet, disableStitch, brandOrganic, brandedContent}.",
+        "Publishes (or schedules, with scheduledFor as an ISO time with offset) media to one or more connected accounts.",
+        "Pass mediaAssetId for one video or photo, or mediaAssetIds (in order) for a photo carousel:",
+        "a TikTok photo post (1–35 JPEG/WebP) or an Instagram carousel (2–10 JPEGs, format post). YouTube needs a video.",
+        "options per target: youtube {title, description?, tags?, privacy: public|unlisted|private, containsSyntheticMedia?};",
+        "instagram {format: reel|post|story, shareToFeed?} (post = JPEG photo or carousel);",
+        "tiktok {privacyLevel (from get_platform_requirements), disableComment, disableDuet, disableStitch, brandOrganic, brandedContent, isAigc?, autoAddMusic? (photo posts)}.",
+        "Optional campaign (string) and meta (JSON) are stored with the post so you can find and learn from past posts with list_posts.",
         "Publishing runs in the background; poll get_post for per-platform results.",
       ].join(" "),
       inputSchema: createPostSchema,
@@ -177,14 +209,29 @@ export function registerTools(server: McpServer) {
     "list_posts",
     {
       title: "List posts",
-      description: "Lists recent posts, newest first. Filter by status to find scheduled or failed ones.",
+      description:
+        "Lists posts newest first, with their campaign and meta. Filter by status, campaign, or creation time (since, ISO). Page back by passing the oldest created_at you got as before.",
       inputSchema: z.object({
         status: z.array(z.enum(["scheduled", "publishing", "published", "partial", "failed", "canceled"])).optional(),
+        projectId: z.string().uuid().optional().describe("Only this project's posts"),
+        campaign: z.string().optional(),
+        since: z.string().datetime({ offset: true }).optional(),
+        before: z.string().datetime({ offset: true }).optional(),
         limit: z.number().int().min(1).max(100).default(20),
       }),
     },
-    tool(async ({ status, limit }: { status?: ("scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled")[]; limit?: number }, userId) =>
-      (await listPosts(userId, { status, limit })).map(summarizePost),
+    tool(
+      async (
+        args: {
+          status?: ("scheduled" | "publishing" | "published" | "partial" | "failed" | "canceled")[];
+          projectId?: string;
+          campaign?: string;
+          since?: string;
+          before?: string;
+          limit?: number;
+        },
+        userId,
+      ) => (await listPosts(userId, args)).map(summarizePost),
     ),
   );
 

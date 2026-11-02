@@ -1,5 +1,9 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { signToken, verifyToken } from "@/lib/crypto";
+import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsage } from "@/lib/media/cleanup";
+import { env } from "@/lib/env";
+import { readCapped, safeFetch } from "@/lib/net/safe-fetch";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
 import { SUPPORTED_MIME } from "@/lib/platforms/limits";
 import type { MediaAssetRow, MediaKind } from "@/lib/types";
@@ -113,24 +117,90 @@ export async function signedReadUrls(paths: string[], expiresInS = 60 * 60): Pro
   return Object.fromEntries((data ?? []).flatMap((d) => (d.signedUrl && d.path ? [[d.path, d.signedUrl] as const] : [])));
 }
 
+/** Path prefix that serves media from this app's own domain (verified with TikTok for photo posts). */
+export const APP_MEDIA_PREFIX = "/media/tt/";
+const APP_MEDIA_PURPOSE = "app-media-url";
+
+interface AppMediaToken {
+  /** storage path */
+  p: string;
+  /** mime */
+  m: string;
+  /** expiry, epoch seconds */
+  e: number;
+}
+
+/** Signed, expiring URL on this app's domain that streams one stored file. */
+export function appMediaUrl(asset: Pick<MediaAssetRow, "storage_path" | "mime">, expiresInS = 60 * 60): string {
+  const token = signToken(
+    { p: asset.storage_path, m: asset.mime, e: Math.floor(Date.now() / 1000) + expiresInS } satisfies AppMediaToken,
+    env.tokenEncryptionKey(),
+    APP_MEDIA_PURPOSE,
+  );
+  return `${env.appUrl()}${APP_MEDIA_PREFIX}${token}.${EXT[asset.mime] ?? "bin"}`;
+}
+
+/** Reads a token from appMediaUrl; null when it's forged or expired. */
+export function readAppMediaToken(token: string): { storagePath: string; mime: string } | null {
+  const payload = verifyToken<AppMediaToken>(token.replace(/\.[a-z0-9]+$/i, ""), env.tokenEncryptionKey(), APP_MEDIA_PURPOSE);
+  if (!payload || payload.e < Date.now() / 1000) return null;
+  return { storagePath: payload.p, mime: payload.m };
+}
+
+/** Deletes the stored file (not the row or thumbnail) once nothing needs it anymore. */
+export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_path">): Promise<void> {
+  const db = supabaseAdmin();
+  const { error } = await db.storage.from(MEDIA_BUCKET).remove([asset.storage_path]);
+  if (error) throw error;
+  await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
+}
+
 const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
 
 /** Downloads a public URL into storage (for agents that have a link rather than a local file). */
-export async function importMediaFromUrl(userId: string, sourceUrl: string): Promise<MediaAssetRow> {
-  const url = new URL(sourceUrl);
-  if (url.protocol !== "https:") throw new Error("Only https:// URLs can be imported");
-  if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/.test(url.hostname)) {
-    throw new Error("Private network addresses can't be imported");
-  }
-  const res = await fetch(url, { redirect: "follow" });
+export async function importMediaFromUrl(userId: string, sourceUrl: string, maxBytes = MAX_IMPORT_BYTES): Promise<MediaAssetRow> {
+  const res = await safeFetch(sourceUrl);
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`);
   const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim();
-  const size = Number(res.headers.get("content-length") ?? 0);
-  if (size > MAX_IMPORT_BYTES) throw new Error("File is larger than the 1 GB import limit");
-  const asset = await createMediaAsset(userId, { mime, sizeBytes: size });
-  const body = await res.arrayBuffer();
-  if (body.byteLength > MAX_IMPORT_BYTES) throw new Error("File is larger than the 1 GB import limit");
+  if (!kindForMime(mime)) throw new Error(`Unsupported file type ${mime || "unknown"}. Use MP4/MOV video or JPEG/PNG/WebP images.`);
+  const body = await readCapped(res, maxBytes);
+  const asset = await createMediaAsset(userId, { mime, sizeBytes: body.byteLength });
   const { error } = await supabaseAdmin().storage.from(MEDIA_BUCKET).upload(asset.storage_path, body, { contentType: mime, upsert: true });
   if (error) throw error;
   return finalizeMediaAsset(userId, asset.id);
+}
+
+/**
+ * Frees storage (Supabase's free plan has 1 GB): deletes the stored file once every post using it is
+ * done. The media row and its thumbnail stay so the post history still renders. Returns how many.
+ */
+export async function purgeFinishedMedia(): Promise<number> {
+  const db = supabaseAdmin();
+  const { data: assets } = await db
+    .from("media_assets")
+    .select("id, storage_path, status, created_at")
+    .is("purged_at", null)
+    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString())
+    .order("created_at")
+    .limit(500);
+  if (!assets?.length) return 0;
+  const { data: links } = await db
+    .from("post_media")
+    .select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)")
+    .in("media_asset_id", assets.map((a) => a.id));
+  // Covers of posts made before post_media existed.
+  const { data: covers } = await db
+    .from("posts")
+    .select("status, published_at, updated_at, media_asset_id")
+    .in("media_asset_id", assets.map((a) => a.id));
+  const usage = new Map<string, PostUsage[]>();
+  const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
+  for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
+  for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
+
+  const purgeable = assets.filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  for (const asset of purgeable) {
+    await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
+  }
+  return purgeable.length;
 }

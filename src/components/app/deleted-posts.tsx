@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore, type ComponentProps } from "react";
 import { deletePostAction } from "@/app/(app)/actions";
+import { toast } from "@/components/ui/toast";
 
 /**
  * Posts the user just deleted. Rows hide as soon as Delete is pressed and come back only if the
@@ -16,13 +17,14 @@ const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.del
 export function deletePostNow(postId: string) {
   deleted.add(postId);
   emit();
+  toast.success("Post deleted");
   void deletePostAction(postId)
     .catch(() => ({ ok: false as const, error: "Couldn't reach Vieews. Check your connection and try again." }))
     .then((res) => {
       if (res.ok) return;
       deleted.delete(postId);
       emit();
-      alert(`Couldn't delete the post. ${res.error}`);
+      toast.error("Couldn't delete the post", { description: res.error });
     });
 }
 

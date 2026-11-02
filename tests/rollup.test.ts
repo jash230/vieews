@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: () => ({}), MEDIA_BUCKET: "media" }));
-vi.mock("@/lib/inngest/client", () => ({ inngest: { send: vi.fn() }, EVENTS: {} }));
+vi.mock("@/lib/posts/start", () => ({ startPublishPost: vi.fn(), startRetryTarget: vi.fn() }));
 
 const { rollupStatus } = await import("@/lib/posts/service");
 

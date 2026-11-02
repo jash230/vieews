@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/form";
 import { EmptyState, Notice } from "@/components/ui/misc";
+import { toast } from "@/components/ui/toast";
 import { createApiKeyAction, revokeApiKeyAction } from "../actions";
 
 interface KeyView {
@@ -124,7 +125,8 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
                     if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
                     start(async () => {
                       const res = await revokeApiKeyAction(k.id);
-                      if (!res.ok) setError(res.error);
+                      if (res.ok) toast.success(`Revoked "${k.name}"`);
+                      else setError(res.error);
                     });
                   }}
                 >

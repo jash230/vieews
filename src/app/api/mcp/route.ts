@@ -2,7 +2,7 @@ import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { verifyApiKey } from "@/lib/mcp/api-keys";
 import { registerTools } from "@/lib/mcp/server";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const handler = createMcpHandler(registerTools, {
   serverInfo: { name: "vieews", version: "0.1.0" },

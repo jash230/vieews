@@ -1,0 +1,4 @@
+studio/node_modules/
+# Per-run working files (renders, generated images, voice). Each ad's record lives in Vieews.
+runs/
+.env

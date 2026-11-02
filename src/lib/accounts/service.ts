@@ -29,9 +29,10 @@ export async function getAccount(userId: string, accountId: string): Promise<Soc
   return data as SocialAccountRow;
 }
 
-export async function saveConnectedAccount(userId: string, platform: Platform, tokens: TokenSet, profile: PlatformProfile) {
+/** Saves (or refreshes) a connected account and returns its id. */
+export async function saveConnectedAccount(userId: string, platform: Platform, tokens: TokenSet, profile: PlatformProfile): Promise<string> {
   const key = env.tokenEncryptionKey();
-  const { error } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("social_accounts")
     .upsert(
       {
@@ -50,8 +51,11 @@ export async function saveConnectedAccount(userId: string, platform: Platform, t
         last_error: null,
       },
       { onConflict: "user_id,platform,platform_account_id" },
-    );
+    )
+    .select("id")
+    .single();
   if (error) throw error;
+  return data.id as string;
 }
 
 export async function disconnectAccount(userId: string, accountId: string) {

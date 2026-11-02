@@ -1,22 +1,22 @@
+import { CalendarClock, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import type { CSSProperties } from "react";
-import { siFacebook, siInstagram, siPinterest, siReddit, siSnapchat, siThreads, siTiktok, siTwitch, siX, siYoutube, type SimpleIcon } from "simple-icons";
+import { siInstagram, siTiktok, siYoutube, type SimpleIcon } from "simple-icons";
 
-// Brand colors are only used for the marks themselves (see design-system/MASTER.md).
-const ORBIT: { icon: SimpleIcon; tile?: string; color?: string }[] = [
-  { icon: siYoutube },
-  { icon: siInstagram },
-  { icon: siTiktok },
-  { icon: siX },
-  { icon: siSnapchat, tile: "#FFFC00", color: "#000000" },
-  { icon: siFacebook },
-  { icon: siThreads },
-  { icon: siPinterest },
-  { icon: siTwitch },
-  { icon: siReddit },
+// The three platforms Vieews posts to, alternating with what Vieews does for them.
+// Brand colors are only used for the platform marks (see design-system/MASTER.md).
+type Tile = { key: string; brand: SimpleIcon } | { key: string; feature: LucideIcon; tile: string };
+
+const ORBIT: Tile[] = [
+  { key: "youtube", brand: siYoutube },
+  { key: "copilot", feature: Sparkles, tile: "bg-brand-tea" },
+  { key: "instagram", brand: siInstagram },
+  { key: "schedule", feature: CalendarClock, tile: "bg-brand-olive" },
+  { key: "tiktok", brand: siTiktok },
+  { key: "made", feature: Wand2, tile: "bg-brand-teal" },
 ];
 
 /**
- * Social platform tiles on a tilted ring that slowly spins in 3D, around the Vieews mark.
+ * Platform and feature tiles on a tilted ring that slowly spins in 3D, around the Vieews mark.
  * Perspective makes tiles grow as they swing to the front (bottom) and shrink at the back (top).
  * Pure CSS (see `.orbit*` in globals.css). It never stops; reduced motion only slows it down.
  */
@@ -27,17 +27,20 @@ export function PlatformOrbit({ className }: { className?: string }) {
       <div className="absolute inset-x-[12%] top-1/2 h-[28%] -translate-y-1/4 rounded-[50%] bg-brand-tea/40 blur-2xl" />
       <div className="orbit-plane relative size-0">
         <div className="orbit-spin absolute">
-          {ORBIT.map(({ icon, tile, color }, i) => (
-            <div key={icon.slug} className="orbit-slot absolute" style={{ "--a": `${(360 / ORBIT.length) * i}deg` } as CSSProperties}>
-              <div className="orbit-face absolute -left-6 -top-6 sm:-left-8 sm:-top-8">
-                <span
-                  className="grid size-12 place-items-center rounded-2xl border border-border shadow-md sm:size-16"
-                  style={{ background: tile ?? "var(--background)" }}
-                >
-                  <svg viewBox="0 0 24 24" className="size-6 sm:size-8" style={{ fill: color ?? `#${icon.hex}` }}>
-                    <path d={icon.path} />
-                  </svg>
-                </span>
+          {ORBIT.map((t, i) => (
+            <div key={t.key} className="orbit-slot absolute" style={{ "--a": `${(360 / ORBIT.length) * i}deg` } as CSSProperties}>
+              <div className="orbit-face absolute -left-7 -top-7 sm:-left-9 sm:-top-9">
+                {"brand" in t ? (
+                  <span className="grid size-14 place-items-center rounded-2xl border border-border bg-background shadow-md sm:size-[4.5rem]">
+                    <svg viewBox="0 0 24 24" className="size-7 sm:size-9" style={{ fill: `#${t.brand.hex}` }}>
+                      <path d={t.brand.path} />
+                    </svg>
+                  </span>
+                ) : (
+                  <span className={`grid size-14 place-items-center rounded-2xl text-primary shadow-md sm:size-[4.5rem] ${t.tile}`}>
+                    <t.feature className="size-6 sm:size-8" strokeWidth={2.25} />
+                  </span>
+                )}
               </div>
             </div>
           ))}

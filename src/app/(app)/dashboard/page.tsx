@@ -1,23 +1,54 @@
 import { auth } from "@clerk/nextjs/server";
 import { AlertTriangle, CalendarClock, Link2, PenSquare, Send } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
 import { PostRow } from "@/components/app/post-row";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, Notice, PageHeader } from "@/components/ui/misc";
-import { listAccounts } from "@/lib/accounts/service";
+import { EmptyState, Notice, PageHeader, Skeleton } from "@/components/ui/misc";
+import { NoProject } from "@/components/app/no-project";
+import { getCurrentProject } from "@/lib/projects/current";
+import { listProjectAccounts } from "@/lib/projects/service";
 import { signedReadUrls } from "@/lib/media/service";
 import { listPosts } from "@/lib/posts/service";
 
 export const metadata = { title: "Dashboard" };
 
-export default async function DashboardPage() {
+export default function DashboardPage() {
+  return (
+    <>
+      <PageHeader
+        title="Dashboard"
+        description="Everything you've posted and what's coming up."
+        actions={<ButtonLink href="/compose"><PenSquare aria-hidden /> Create post</ButtonLink>}
+      />
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardContent />
+      </Suspense>
+    </>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div aria-busy="true">
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[86px] rounded-3xl" />)}
+      </div>
+      <Skeleton className="h-80 rounded-3xl" />
+    </div>
+  );
+}
+
+async function DashboardContent() {
   const { userId } = await auth.protect();
+  const project = await getCurrentProject(userId);
+  if (!project) return <NoProject />;
   const [accounts, upcoming, recent] = await Promise.all([
-    listAccounts(userId),
-    listPosts(userId, { status: ["scheduled"], upcoming: true, limit: 5 }),
-    listPosts(userId, { limit: 8 }),
+    listProjectAccounts(userId, project.id),
+    listPosts(userId, { projectId: project.id, status: ["scheduled"], upcoming: true, limit: 5 }),
+    listPosts(userId, { projectId: project.id, limit: 8 }),
   ]);
   const thumbs = await signedReadUrls([...upcoming, ...recent].map((p) => p.media?.thumbnail_path ?? ""));
   const needsReauth = accounts.filter((a) => a.status === "needs_reauth");
@@ -31,12 +62,6 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        description="Everything you've posted and what's coming up."
-        actions={<ButtonLink href="/compose"><PenSquare aria-hidden /> Create post</ButtonLink>}
-      />
-
       {needsReauth.length > 0 && (
         <Notice tone="warning" className="mb-6 flex items-center gap-2">
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
@@ -65,9 +90,9 @@ export default async function DashboardPage() {
         <Card>
           <EmptyState
             icon={<Link2 />}
-            title="Connect your first account"
-            description="Link YouTube, Instagram or TikTok so Vieews can post for you."
-            action={<ButtonLink href="/accounts">Connect accounts</ButtonLink>}
+            title={`Choose where ${project.name} posts`}
+            description="Pick which connected YouTube, Instagram or TikTok accounts post for this project."
+            action={<ButtonLink href={`/projects/${project.id}`}>Choose accounts</ButtonLink>}
           />
         </Card>
       ) : (

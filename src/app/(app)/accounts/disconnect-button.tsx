@@ -2,9 +2,10 @@
 
 import { Unlink } from "lucide-react";
 import { useTransition } from "react";
+import { toast } from "@/components/ui/toast";
 import { disconnectAccountAction } from "../actions";
 
-export function DisconnectButton({ accountId, name }: { accountId: string; name: string }) {
+export function DisconnectButton({ accountId, name, projects = [] }: { accountId: string; name: string; projects?: string[] }) {
   const [pending, start] = useTransition();
   return (
     <button
@@ -13,10 +14,12 @@ export function DisconnectButton({ accountId, name }: { accountId: string; name:
       title="Disconnect"
       disabled={pending}
       onClick={() => {
-        if (!confirm(`Disconnect ${name}? Scheduled posts to this account will be removed.`)) return;
+        const lose = projects.length ? ` ${projects.join(", ")} will stop posting to it.` : "";
+        if (!confirm(`Disconnect ${name}? Scheduled posts to this account will be removed.${lose}`)) return;
         start(async () => {
           const res = await disconnectAccountAction(accountId);
-          if (!res.ok) alert(res.error);
+          if (res.ok) toast.success(`Disconnected ${name}`);
+          else toast.error(`Couldn't disconnect ${name}`, { description: res.error });
         });
       }}
       className="grid size-11 shrink-0 place-items-center rounded-xl text-subtle-foreground transition-colors hover:bg-destructive-soft hover:text-destructive disabled:opacity-50"

@@ -31,7 +31,9 @@ Radius: 12 (small controls, inputs) / 16 (buttons, tiles) / 24 (cards) / 32 (lan
 
 ## Components
 - Buttons: `min-h-11` (44px). Variants primary / secondary / ghost / destructive. Primary lifts on hover and squishes onto its lip when pressed (spring easing). Loading shows the `Loader` dots and sets `aria-busy`.
-- Inputs: visible `<label>`, hint below, error below with `role="alert"`, character counters for limited fields. Focus: accent border + tea glow.
+- Inputs: visible `<label>`, hint below, error below with `role="alert"`, character counters for limited fields. `Field` links its hint, error and counter to the control (`aria-describedby`, `aria-invalid`, `aria-required`). Focus: accent border + tea glow.
+- Toasts: `toast` from `src/components/ui/toast.tsx` (sonner, themed with the tokens, `richColors`). Top-center just under the app header, so they never cover bottom bars or the copilot. Every action that changes data says how it went: success toast, or the error next to the control (or an error toast when there's no place for it).
+- Section saves (project settings): each card saves on its own; a save in one never resets another's unsaved edits.
 - Status: always icon + text (`StatusBadge`), never color alone. In-flight states (publishing, processing) show `Loader` dots.
 - Empty states: floating icon tile + title + one sentence + one action.
 - Nav: active item gets `primary-soft` + an olive pill; icons wiggle on hover. `useLinkStatus` shows hopping dots while a route is still loading.
@@ -46,9 +48,10 @@ Radius: 12 (small controls, inputs) / 16 (buttons, tiles) / 24 (cards) / 32 (lan
 Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entrances). Micro-interactions 150–300ms; entrances 500–600ms with 80–90ms stagger. Animate transform/opacity only. Utilities: `animate-fade-up`, `animate-pop-in`, `animate-float`, `animate-wiggle`, `animate-hop`, `animate-shimmer`, `animate-stripes`. The global `prefers-reduced-motion` override in `globals.css` cuts every CSS animation to its end frame, except the landing orbit, which only slows down. The motion-based components check `useReducedMotion` themselves.
 
 ## Landing page
-- Hero: Fredoka headline "Upload once. Post to [word]" where `WordRotate` cycles everywhere → YouTube → Instagram → TikTok over a tea-green marker. Screen readers get the static sentence.
-- `PlatformOrbit`: social platform tiles on a tilted ring spinning in 3D around the Vieews mark. Pure CSS, so tiles grow at the front and shrink at the back through perspective. It never stops: no hover pause, and under reduced motion it is exempt from the global cut-off and turns slower (90s per lap) instead.
-- Header holds only the logo; "Get started" is the way in.
+- Story: autopilot. Vieews makes, schedules and publishes the posts; the user checks in; the copilot guides. Features that haven't shipped carry a "Coming soon" chip so the site stays accurate for platform reviewers. No pricing section until tiers are settled.
+- Hero: Fredoka headline "Your app's social marketing, on autopilot." with "on autopilot." over a tea-green marker. The pill above it says "Posting to [word]", where `WordRotate` cycles YouTube → Instagram → TikTok. Screen readers get the static sentence.
+- `PlatformOrbit`: the three supported platforms alternating with Vieews feature tiles (copilot, schedule, auto-made posts) on a tilted ring spinning in 3D around the Vieews mark. Pure CSS, so tiles grow at the front and shrink at the back through perspective. It never stops: no hover pause, and under reduced motion it is exempt from the global cut-off and turns slower (90s per lap) instead.
+- Header: sticky and translucent; logo, in-page section links (from 640px), "Sign in" (ghost) and "Get started".
 - From 1024px up, the hero and feature cards fill the first screen and the column widens past the app's `max-w-6xl` (`max-w-7xl`, 88rem from 1536px), so laptops get a full-screen first view. Below 1024px it flows normally.
 - Floating palette blobs, stagger-in feature cards, and a Prussian CTA band.
 
@@ -59,8 +62,9 @@ Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entr
 Both use `motion`.
 
 ## Layout
-Mobile-first. ≥1024px: 256px sidebar. Below: sticky top bar + right sheet menu (Esc and scrim close it). Content `max-w-6xl`, gutters 16 / 24 / 40px.
-Main + side-column pages (dashboard, compose, AI & API keys) go two-column at ≥1280px, since the sidebar leaves too little room at 1024px. Grid tracks that hold text use `minmax(0,1fr)`, never a bare `1fr`, so a long line (a caption, a code snippet) can't push the side column off-screen. Code snippets wrap instead of scrolling.
+Mobile-first. A 56px top bar holds the logo, the project menu, the workspace tabs (a second row below 768px), the Copilot button (below 1024px) and the user menu. Content `max-w-6xl`, gutters 16 / 24 / 40px.
+The copilot docks on the left at ≥1024px (resizable 320–560px by drag or arrow keys, collapsible to a rail). Below 1024px it's an overlay opened from the top bar: full screen under 768px, a 26rem right sheet over a scrim from 768px. It acts as a dialog: focus moves to its input, Esc or the scrim closes it, focus returns to the button, and following a link from the chat closes it. The chat only auto-scrolls while you're at the bottom; otherwise a "Jump to latest" pill appears.
+Main + side-column pages (dashboard, compose, AI & API keys) go two-column at ≥1280px, since the docked copilot leaves too little room at 1024px. Below that, the composer keeps a sticky action bar (Publish/Schedule plus what's blocking it) that steps aside when the real publish card is on screen. Grid tracks that hold text use `minmax(0,1fr)`, never a bare `1fr`, so a long line (a caption, a code snippet) can't push the side column off-screen. Code snippets wrap instead of scrolling.
 
 ## Accessibility
-Focus ring 2px `--ring` with 2px offset on every focusable element. Skip link in the app shell. `aria-current` on nav, `role="switch"` on toggles, `aria-live` for upload progress and validation. Decorative motion (blobs, orbit, rotating word) is `aria-hidden`.
+Focus ring 2px `--ring` with 2px offset on every focusable element, set in `@layer base` so a control with its own focus style (`outline-none` plus a ring, like inputs and the chat box) replaces it instead of doubling up. Skip link in the app shell. `aria-current` on nav, `role="switch"` on toggles, `aria-live` for upload progress and validation. Decorative motion (blobs, orbit, rotating word) is `aria-hidden`.

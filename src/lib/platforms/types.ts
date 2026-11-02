@@ -24,7 +24,10 @@ export interface AuthorizeParams {
 
 export interface PublishContext {
   account: SocialAccountRow;
+  /** The first (cover) item. */
   media: MediaAssetRow;
+  /** Every item in order; more than one means a photo carousel. */
+  items: MediaAssetRow[];
   caption: string;
   options: TargetOptions;
   /** Durable step: result is memoized across retries; keep secrets out of return values. */
@@ -33,6 +36,10 @@ export interface PublishContext {
   accessToken(): Promise<string>;
   /** Short-lived signed URL the platform (or this server) can download the media from. */
   mediaUrl(): Promise<string>;
+  /** Signed URLs for every item, in order. */
+  itemUrls(): Promise<string[]>;
+  /** URLs for every item on this app's own domain (TikTok only pulls from verified URL prefixes). */
+  appItemUrls(): string[];
   /** Persist progress so the UI can show it. */
   setStatus(status: "uploading" | "processing"): Promise<void>;
 }

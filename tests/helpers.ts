@@ -19,12 +19,22 @@ export function mockFetch(routes: [RegExp | ((url: string, init: RequestInit) =>
   return calls;
 }
 
-export function fakeCtx(overrides: { media?: Partial<MediaAssetRow>; account?: Partial<SocialAccountRow>; options: TargetOptions; caption?: string }) {
+export function fakeCtx(overrides: {
+  media?: Partial<MediaAssetRow>;
+  /** Extra items after the first; makes the post a carousel. */
+  more?: Partial<MediaAssetRow>[];
+  account?: Partial<SocialAccountRow>;
+  options: TargetOptions;
+  caption?: string;
+}) {
   const steps: string[] = [];
   const statuses: string[] = [];
+  const media = { id: "m", kind: "video", mime: "video/mp4", size_bytes: 1000, storage_path: "u/m.mp4", duration_s: 10, ...overrides.media } as MediaAssetRow;
+  const items = [media, ...(overrides.more ?? []).map((m, i) => ({ ...media, id: `m${i + 2}`, storage_path: `u/m${i + 2}.jpg`, ...m }) as MediaAssetRow)];
   const ctx: PublishContext = {
     account: { id: "acc", platform: overrides.options.platform, platform_account_id: "17841", ...overrides.account } as SocialAccountRow,
-    media: { id: "m", kind: "video", mime: "video/mp4", size_bytes: 1000, storage_path: "u/m.mp4", duration_s: 10, ...overrides.media } as MediaAssetRow,
+    media,
+    items,
     caption: overrides.caption ?? "caption",
     options: overrides.options,
     run: async (id, fn) => {
@@ -34,6 +44,8 @@ export function fakeCtx(overrides: { media?: Partial<MediaAssetRow>; account?: P
     sleep: async (id) => void steps.push(id),
     accessToken: async () => "token",
     mediaUrl: async () => "https://storage.example/media.mp4",
+    itemUrls: async () => items.map((m) => `https://storage.example/${m.storage_path}`),
+    appItemUrls: () => items.map((m) => `https://app.example/media/tt/${m.id}.jpg`),
     setStatus: async (s) => void statuses.push(s),
   };
   return { ctx, steps, statuses };

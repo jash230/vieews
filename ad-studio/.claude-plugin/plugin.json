@@ -1,0 +1,6 @@
+{
+  "name": "ad-studio",
+  "version": "0.1.0",
+  "description": "Makes short-form app ads (TikTok photo slideshows, Instagram carousels and Reels, YouTube Shorts) from formats that worked for real apps, and posts them through Vieews.",
+  "skills": "./skills"
+}

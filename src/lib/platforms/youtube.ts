@@ -102,7 +102,11 @@ export const youtube: PlatformAdapter = {
             tags: opts.tags?.length ? opts.tags : undefined,
             categoryId: "22",
           },
-          status: { privacyStatus: opts.privacy, selfDeclaredMadeForKids: opts.madeForKids ?? false },
+          status: {
+            privacyStatus: opts.privacy,
+            selfDeclaredMadeForKids: opts.madeForKids ?? false,
+            ...(opts.containsSyntheticMedia !== undefined && { containsSyntheticMedia: opts.containsSyntheticMedia }),
+          },
         }),
       });
       await expectOk(res, "YouTube upload session");

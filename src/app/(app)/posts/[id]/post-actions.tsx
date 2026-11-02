@@ -2,19 +2,52 @@
 
 import { Ban, RotateCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useTransition } from "react";
-import { deletePostNow } from "@/components/app/deleted-posts";
+import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { cancelPostAction, retryTargetAction } from "../../actions";
+import { deletePostNow } from "@/components/app/deleted-posts";
+import { toast } from "@/components/ui/toast";
+import { cancelPostAction, postProgressAction, retryTargetAction } from "../../actions";
 
-/** Re-fetches the server component while publishing is in progress. */
-export function AutoRefresh({ everyMs = 5000 }: { everyMs?: number }) {
+/**
+ * While publishing, polls a small status check and re-renders the page only when a status actually
+ * changes, so the video and the rest of the page stay put in between.
+ */
+export function AutoRefresh({ postId, everyMs = 5000 }: { postId: string; everyMs?: number }) {
   const router = useRouter();
   useEffect(() => {
-    const id = setInterval(() => router.refresh(), everyMs);
+    let last: string | null = null;
+    let busy = false;
+    const id = setInterval(async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      const res = await postProgressAction(postId).catch(() => null);
+      busy = false;
+      if (!res?.ok) return;
+      if (last !== null && res.data !== last) router.refresh();
+      last = res.data;
+    }, everyMs);
     return () => clearInterval(id);
-  }, [router, everyMs]);
+  }, [router, postId, everyMs]);
   return null;
+}
+
+/**
+ * Each refresh signs a new media URL; swapping it into the player would restart playback,
+ * so keep the first one and only take a fresh one if it stops loading (expired).
+ */
+export function PostVideo({ src }: { src: string }) {
+  const [current, setCurrent] = useState(src);
+  return (
+    <video
+      src={current}
+      onError={() => current !== src && setCurrent(src)}
+      controls
+      playsInline
+      preload="metadata"
+      className="size-full object-contain"
+      aria-label="Post video"
+    />
+  );
 }
 
 export function CancelPostButton({ postId }: { postId: string }) {
@@ -27,7 +60,8 @@ export function CancelPostButton({ postId }: { postId: string }) {
         if (!confirm("Cancel this scheduled post? It won't be published anywhere.")) return;
         start(async () => {
           const res = await cancelPostAction(postId);
-          if (!res.ok) alert(res.error);
+          if (res.ok) toast.success("Post canceled", { description: "It won't be published anywhere." });
+          else toast.error("Couldn't cancel the post", { description: res.error });
         });
       }}
     >
@@ -63,7 +97,8 @@ export function RetryButton({ postId, targetId }: { postId: string; targetId: st
       onClick={() =>
         start(async () => {
           const res = await retryTargetAction(postId, targetId);
-          if (!res.ok) alert(res.error);
+          if (res.ok) toast.success("Retrying", { description: "Vieews is posting it again. This page updates when it's done." });
+          else toast.error("Couldn't retry", { description: res.error });
         })
       }
     >
