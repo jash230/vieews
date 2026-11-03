@@ -3,7 +3,7 @@
 
 export const MODELS = {
   /** The copilot: tool use across a whole conversation. */
-  copilot: "claude-sonnet-5-5",
+  copilot: "claude-haiku-5-5",
   /** One-shot extraction, e.g. drafting a project from a store listing. */
   draft: "claude-haiku-5-5",
 } as const;

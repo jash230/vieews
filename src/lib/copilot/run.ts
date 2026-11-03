@@ -98,8 +98,10 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
           output_config: { effort: "medium" },
           cache_control: { type: "ephemeral" },
           // Retries a declined request on Anthropic's recommended fallback model.
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          // Haiku has no server-side fallback, so only send it for the larger models.
+          ...(MODELS.copilot.startsWith("claude-haiku")
+            ? {}
+            : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
         },
         { signal: input.signal },
       );
