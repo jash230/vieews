@@ -23,6 +23,7 @@ const RESIZE_STEP = 16;
 const STICK_PX = 80;
 
 const SUGGESTIONS = ["What's still missing from my project?", "Write 3 caption ideas for my next post", "What's scheduled this week?"];
+const BLANK_SUGGESTIONS = ["What can you do?", "Help me plan posts for my app", "How do I connect TikTok?"];
 
 /** Applies one streamed event to the assistant message being built. */
 function applyEvent(items: ChatItem[], event: CopilotEvent): ChatItem[] {
@@ -46,10 +47,13 @@ export function CopilotPanel({
   project,
   projects,
   initialMessages,
+  blank = false,
 }: {
   project: ProjectOption | null;
   projects: ProjectOption[];
   initialMessages: ChatMessage[];
+  /** The project has no link or pitch yet, so the chat opens without assuming anything. */
+  blank?: boolean;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
@@ -324,11 +328,15 @@ export function CopilotPanel({
                   {all.length === 0 ? (
                     <div className="flex h-full flex-col justify-end gap-3 pb-2">
                       <div className="px-1">
-                        <p className="font-display text-lg font-semibold">Hi! I know {project.name}.</p>
-                        <p className="mt-1 text-sm text-muted-foreground">Ask me to fix its details, or attach a video and tell me where and when to post it.</p>
+                        <p className="font-display text-lg font-semibold">{blank ? "Hi! What are we promoting?" : `Hi! I know ${project.name}.`}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {blank
+                            ? "Ask me anything, tell me about your app, or paste its link and I'll set it up."
+                            : "Ask me to fix its details, or attach a video and tell me where and when to post it."}
+                        </p>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {SUGGESTIONS.map((s) => (
+                        {(blank ? BLANK_SUGGESTIONS : SUGGESTIONS).map((s) => (
                           <button
                             key={s}
                             type="button"
@@ -387,7 +395,7 @@ export function CopilotPanel({
                 attachments={attachments}
                 onAttach={attach}
                 onRemoveAttachment={removeAttachment}
-                placeholder={`Ask about ${project.name}…`}
+                placeholder={blank ? "Ask the copilot anything…" : `Ask about ${project.name}…`}
               />
             </>
           )}

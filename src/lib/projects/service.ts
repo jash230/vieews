@@ -94,6 +94,22 @@ export async function defaultProject(userId: string): Promise<ProjectRow | null>
   return data ? parseRow(data as ProjectRow) : null;
 }
 
+/**
+ * The user's first project, creating a blank "My app" when they have none, so the copilot can
+ * chat right away. Safe to call concurrently: the unique slug keeps it to one.
+ */
+export async function ensureFirstProject(userId: string): Promise<ProjectRow> {
+  const existing = await defaultProject(userId);
+  if (existing) return existing;
+  const { error } = await supabaseAdmin()
+    .from("projects")
+    .upsert({ user_id: userId, name: "My app", slug: "my-app", kit: projectKitSchema.parse({}) }, { onConflict: "user_id,slug", ignoreDuplicates: true });
+  if (error) throw error;
+  const created = await defaultProject(userId);
+  if (!created) throw new Error("Couldn't create your first project");
+  return created;
+}
+
 export async function createProject(userId: string, input: ProjectInput): Promise<ProjectRow> {
   const name = input.name.trim();
   if (!name) throw new Error("Give the project a name");

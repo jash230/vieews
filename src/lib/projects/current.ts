@@ -1,16 +1,16 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { defaultProject, getProject, ProjectNotFoundError, type ProjectRow } from "./service";
+import { ensureFirstProject, getProject, ProjectNotFoundError, type ProjectRow } from "./service";
 
 /** Which project the top-left dropdown and the copilot chip have selected. */
 export const PROJECT_COOKIE = "vieews_project";
 
 /**
  * The selected project, falling back to the user's first one when the cookie is missing or
- * points at a project they no longer have. Null for a user with no projects yet.
+ * points at a project they no longer have. A user with none gets a blank "My app".
  * Reads cookies, so callers render inside a Suspense boundary.
  */
-export async function getCurrentProject(userId: string): Promise<ProjectRow | null> {
+export async function getCurrentProject(userId: string): Promise<ProjectRow> {
   const id = (await cookies()).get(PROJECT_COOKIE)?.value;
   if (id) {
     try {
@@ -19,7 +19,7 @@ export async function getCurrentProject(userId: string): Promise<ProjectRow | nu
       if (!(err instanceof ProjectNotFoundError)) throw err;
     }
   }
-  return defaultProject(userId);
+  return ensureFirstProject(userId);
 }
 
 export async function setCurrentProjectCookie(projectId: string) {

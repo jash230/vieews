@@ -14,8 +14,10 @@ import { listProjectOptions } from "@/lib/projects/options";
 
 async function TopProjectMenu() {
   const { userId } = await auth.protect();
-  const [projects, current] = await Promise.all([listProjectOptions(userId), getCurrentProject(userId)]);
-  return <ProjectSwitcher projects={projects} currentId={current?.id ?? null} />;
+  // The current project first: it may create the user's first one, which the list must include.
+  const current = await getCurrentProject(userId);
+  const projects = await listProjectOptions(userId);
+  return <ProjectSwitcher projects={projects} currentId={current.id} />;
 }
 
 function CopilotSkeleton() {

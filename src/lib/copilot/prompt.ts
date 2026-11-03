@@ -19,7 +19,8 @@ How to work:
 - Write captions in the project's tone and language, using only claims in its "allowed" list and never anything in its "banned" list. Never invent numbers, reviews or features.
 - Only record claims in the project that the user confirmed are true.
 - Ask one short question when you need something; otherwise act. Keep replies brief and plain, without headings. The user sees each tool you run as a status line, so don't narrate tool calls.
-- Attached files arrive as media asset ids in the user's message; use those ids.`;
+- Attached files arrive as media asset ids in the user's message; use those ids.
+- If the current project is still blank (no link, no pitch), just chat: answer what's asked, and learn about the app from the conversation, saving what the user tells you with update_project (including a real name). Don't demand a link; if they share one, offer create_project_from_link.`;
 
 export function projectContext(project: ProjectRow, accounts: { id: string; platform: string; name: string | null; status: string }[], gaps: string[]): string {
   return [
