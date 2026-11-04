@@ -86,7 +86,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => onRemoveAttachment(a.key)}
                   aria-label={`Remove ${a.file.name}`}
-                  className="absolute right-0.5 top-0.5 grid size-5 place-items-center rounded-full bg-foreground/70 text-white"
+                  className="absolute right-0.5 top-0.5 grid size-5 place-items-center rounded-full bg-foreground/70 text-white after:absolute after:-inset-2.5 after:content-['']"
                 >
                   <X className="size-3" aria-hidden />
                 </button>
@@ -116,7 +116,7 @@ export function ChatInput({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach a video or photos"
-            className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-primary-soft hover:text-foreground"
+            className="relative grid size-9 place-items-center rounded-full text-muted-foreground after:absolute after:-inset-1 after:content-[''] transition-colors hover:bg-primary-soft hover:text-foreground"
           >
             <Paperclip className="size-[18px]" aria-hidden />
           </button>
@@ -137,7 +137,7 @@ export function ChatInput({
             onClick={() => (streaming ? onStop() : canSend && onSend())}
             disabled={!streaming && !canSend}
             className={cn(
-              "grid size-9 place-items-center rounded-full transition-[background-color,translate] duration-150 ease-spring",
+              "relative grid size-9 place-items-center rounded-full transition-[background-color,translate] duration-150 ease-spring after:absolute after:-inset-1 after:content-['']",
               streaming || canSend ? "bg-primary text-on-primary hover:-translate-y-0.5" : "bg-muted text-subtle-foreground",
             )}
           >

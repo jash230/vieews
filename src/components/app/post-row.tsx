@@ -1,8 +1,9 @@
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { Film, ImageIcon } from "lucide-react";
 import Link from "next/link";
 import type { PostWithTargets } from "@/lib/posts/service";
 import { PostRowItem } from "./deleted-posts";
+import { LocalTime } from "./local-time";
 import { PlatformIcon } from "./platform";
 import { PostMenu } from "./post-menu";
 import { StatusBadge } from "./status";
@@ -16,7 +17,7 @@ const DOT: Record<string, string> = {
 
 export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: string }) {
   const when = post.scheduled_for && post.status === "scheduled"
-    ? `Scheduled for ${format(new Date(post.scheduled_for), "EEE d MMM, h:mm a")}`
+    ? <>Scheduled for <LocalTime iso={post.scheduled_for} fmt="EEE d MMM, h:mm a" /></>
     : formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   return (
     <PostRowItem postId={post.id} className="flex items-center pr-2 transition-colors duration-150 hover:bg-primary-soft/60">

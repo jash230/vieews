@@ -92,7 +92,17 @@ export function CopilotPanel({
     aside.current?.querySelector<HTMLElement>("textarea, input")?.focus();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileOpen(false);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    // A modal sheet: keep Tab and screen readers out of the page behind it (only while it overlays, below lg).
+    const behind = window.matchMedia("(max-width: 1023.98px)").matches
+      ? [...document.querySelectorAll<HTMLElement>("#main, body header, body aside")].filter(
+          (el) => !aside.current?.contains(el) && !el.contains(aside.current) && !el.hasAttribute("inert"),
+        )
+      : [];
+    behind.forEach((el) => el.setAttribute("inert", ""));
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      behind.forEach((el) => el.removeAttribute("inert"));
+    };
   }, [mobileOpen, setMobileOpen]);
 
   function onScroll() {

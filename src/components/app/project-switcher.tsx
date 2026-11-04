@@ -73,9 +73,9 @@ export function ProjectSwitcher({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
+        aria-haspopup="true"
         aria-expanded={open}
-        aria-controls={listId}
+        aria-controls={open ? listId : undefined}
         aria-label={`Project: ${current?.name ?? "none"}. Switch project`}
         className={cn(
           "flex min-w-0 items-center gap-2 text-left transition-colors duration-150",
@@ -106,11 +106,12 @@ export function ProjectSwitcher({
               className="mb-1 min-h-10 w-full rounded-xl border border-border px-3 text-sm focus-visible:border-accent focus-visible:outline-none"
             />
           )}
-          <ul id={listId} role="listbox" aria-label="Projects" className="max-h-72 overflow-y-auto">
+          <ul id={listId} aria-label="Projects" className="max-h-72 overflow-y-auto">
             {shown.map((p) => (
-              <li key={p.id} role="option" aria-selected={p.id === currentId}>
+              <li key={p.id}>
                 <button
                   type="button"
+                  aria-current={p.id === currentId || undefined}
                   onClick={() => pick(p.id)}
                   disabled={pending}
                   className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2 text-left text-sm font-semibold hover:bg-primary-soft disabled:opacity-60"

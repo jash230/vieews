@@ -28,9 +28,13 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
           type="button"
           aria-label={copied ? "Copied" : `Copy ${label}`}
           onClick={async () => {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+              await navigator.clipboard.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch {
+              toast.error("Couldn't copy. Select the text and copy it yourself.");
+            }
           }}
           className="absolute right-1.5 top-1.5 grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -118,25 +122,34 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
                     <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
                   </p>
                 </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
-                    start(async () => {
-                      const res = await revokeApiKeyAction(k.id);
-                      if (res.ok) toast.success(`Revoked "${k.name}"`);
-                      else setError(res.error);
-                    });
-                  }}
-                >
-                  <Trash2 aria-hidden /> Revoke
-                </Button>
+                <RevokeButton id={k.id} name={k.name} />
               </li>
             ))}
           </ul>
         )}
       </Card>
     </div>
+  );
+}
+
+/** Each row gets its own pending state, so revoking doesn't spin "Create key" or allow repeat clicks. */
+function RevokeButton({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      variant="destructive"
+      size="sm"
+      loading={pending}
+      onClick={() => {
+        if (!confirm(`Revoke "${name}"? Anything using it will stop working.`)) return;
+        start(async () => {
+          const res = await revokeApiKeyAction(id);
+          if (res.ok) toast.success(`Revoked "${name}"`);
+          else toast.error(`Couldn't revoke "${name}": ${res.error}`);
+        });
+      }}
+    >
+      <Trash2 aria-hidden /> Revoke
+    </Button>
   );
 }
