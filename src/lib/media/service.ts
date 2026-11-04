@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { signToken, verifyToken } from "@/lib/crypto";
 import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsage } from "@/lib/media/cleanup";
 import { env } from "@/lib/env";
+import { UPLOAD_MAX_BYTES } from "@/lib/media/shrink-plan";
 import { readCapped, safeFetch } from "@/lib/net/safe-fetch";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
 import { SUPPORTED_MIME } from "@/lib/platforms/limits";
@@ -155,7 +156,8 @@ export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_
   await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
 }
 
-const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+// Storage takes at most UPLOAD_MAX_BYTES per file, so a bigger download would only fail at upload.
+const MAX_IMPORT_BYTES = UPLOAD_MAX_BYTES;
 
 /** Downloads a public URL into storage (for agents that have a link rather than a local file). */
 export async function importMediaFromUrl(userId: string, sourceUrl: string, maxBytes = MAX_IMPORT_BYTES): Promise<MediaAssetRow> {
@@ -175,15 +177,30 @@ export async function importMediaFromUrl(userId: string, sourceUrl: string, maxB
  * done. The media row and its thumbnail stay so the post history still renders. Returns how many.
  */
 export async function purgeFinishedMedia(): Promise<number> {
+  // Assets still in use are never marked purged, so page past them instead of re-reading the same oldest batch.
+  let purged = 0;
+  let after: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const batch = await purgeFinishedBatch(after);
+    purged += batch.purged;
+    if (!batch.last) break;
+    after = batch.last;
+  }
+  return purged;
+}
+
+const PURGE_BATCH = 500;
+
+async function purgeFinishedBatch(after: string | null): Promise<{ purged: number; last: string | null }> {
   const db = supabaseAdmin();
-  const { data: assets } = await db
+  let query = db
     .from("media_assets")
     .select("id, storage_path, status, created_at")
     .is("purged_at", null)
-    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString())
-    .order("created_at")
-    .limit(500);
-  if (!assets?.length) return 0;
+    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString());
+  if (after) query = query.gt("created_at", after);
+  const { data: assets } = await query.order("created_at").limit(PURGE_BATCH);
+  if (!assets?.length) return { purged: 0, last: null };
   const { data: links } = await db
     .from("post_media")
     .select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)")
@@ -193,14 +210,23 @@ export async function purgeFinishedMedia(): Promise<number> {
     .from("posts")
     .select("status, published_at, updated_at, media_asset_id")
     .in("media_asset_id", assets.map((a) => a.id));
+  // Project icons and screenshots aren't posts but still need their files.
+  const [{ data: projectMedia }, { data: icons }] = await Promise.all([
+    db.from("project_media").select("media_asset_id").in("media_asset_id", assets.map((a) => a.id)),
+    db.from("projects").select("icon_asset_id").in("icon_asset_id", assets.map((a) => a.id)),
+  ]);
+  const kept = new Set<string>([
+    ...(projectMedia ?? []).map((r) => r.media_asset_id as string),
+    ...(icons ?? []).map((r) => r.icon_asset_id as string),
+  ]);
   const usage = new Map<string, PostUsage[]>();
   const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
   for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
   for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
 
-  const purgeable = assets.filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  const purgeable = assets.filter((a) => !kept.has(a.id as string) && isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
   for (const asset of purgeable) {
     await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
   }
-  return purgeable.length;
+  return { purged: purgeable.length, last: assets.length === PURGE_BATCH ? (assets[assets.length - 1].created_at as string) : null };
 }

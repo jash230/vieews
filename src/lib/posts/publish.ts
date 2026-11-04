@@ -76,11 +76,15 @@ export async function failPendingTargets(postId: string, message: string) {
 
 /** Posts the daily cron should restart: overdue scheduled ones and stalled publishing ones. */
 export async function findStalledPosts(): Promise<string[]> {
+  const cutoff = new Date(Date.now() - HEAL_AFTER_MS).toISOString();
   const { data } = await supabaseAdmin()
     .from("posts")
     .select("id, status, scheduled_for, updated_at, targets:post_targets(status)")
     .in("status", ["scheduled", "publishing"])
-    .lt("updated_at", new Date(Date.now() - HEAL_AFTER_MS).toISOString())
+    .lt("updated_at", cutoff)
+    // Future scheduled posts are healthy; leaving them out keeps the 100 for posts that may be stuck.
+    .or(`status.eq.publishing,scheduled_for.is.null,scheduled_for.lt."${cutoff}"`)
+    .order("updated_at")
     .limit(100);
   const posts = (data ?? []) as unknown as (Parameters<typeof needsRestart>[0] & { id: string })[];
   return posts.filter((p) => needsRestart(p)).map((p) => p.id);
@@ -107,7 +111,13 @@ export async function planPublish(postId: string): Promise<PublishPlan> {
     await refreshPostStatus(postId);
     return { kind: "skip" };
   }
-  if (post.status !== "publishing") await db.from("posts").update({ status: "publishing" }).eq("id", postId);
+  if (post.status === "scheduled") {
+    // Flip only if it's still scheduled, so a cancel landing at the same moment wins cleanly.
+    const { data: flipped } = await db.from("posts").update({ status: "publishing" }).eq("id", postId).eq("status", "scheduled").select("id");
+    if (!flipped?.length) return { kind: "skip" };
+  } else if (post.status !== "publishing") {
+    await db.from("posts").update({ status: "publishing" }).eq("id", postId);
+  }
   const byAccount = new Map<string, string[]>();
   for (const t of pending) byAccount.set(t.social_account_id as string, [...(byAccount.get(t.social_account_id as string) ?? []), t.id as string]);
   return { kind: "go", byAccount: [...byAccount.values()] };

@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     if (err instanceof ProjectNotFoundError) return Response.json({ error: "Project not found" }, { status: 404 });
     throw err;
   }
-  const timeZone = Intl.supportedValuesOf("timeZone").includes(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
+  const timeZone = validTimeZone(parsed.data.timeZone);
 
   const encoder = new TextEncoder();
   const events = runTurn({ userId, projectId, text: text.trim(), attachments, timeZone, signal: req.signal });
@@ -42,4 +42,14 @@ export async function POST(req: Request) {
     },
   });
   return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });
+}
+
+/** Any zone Intl can format with. supportedValuesOf leaves out current names like Asia/Kolkata. */
+function validTimeZone(tz: string): string {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return "UTC";
+  }
 }

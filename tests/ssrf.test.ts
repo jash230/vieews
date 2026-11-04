@@ -16,6 +16,13 @@ describe("isPrivateAddress", () => {
 
   it.each(["93.184.216.34", "172.32.0.1", "8.8.8.8", "2606:4700::1111", "::ffff:8.8.8.8"])("allows %s", (ip) => expect(isPrivateAddress(ip)).toBe(false));
 
+  it.each(["::ffff:7f00:1", "::ffff:a9fe:a9fe", "::127.0.0.1", "::7f00:1", "64:ff9b::a00:1", "2002:7f00:1::", "0:0:0:0:0:0:0:1"])(
+    "blocks IPv4 hidden in IPv6 %s",
+    (ip) => expect(isPrivateAddress(ip)).toBe(true),
+  );
+
+  it.each(["::ffff:808:808", "64:ff9b::808:808", "2002:808:808::"])("allows public IPv4 inside IPv6 %s", (ip) => expect(isPrivateAddress(ip)).toBe(false));
+
   it("treats garbage as unsafe", () => expect(isPrivateAddress("not-an-ip")).toBe(true));
 });
 
@@ -29,6 +36,8 @@ describe("assertPublicUrl", () => {
     await expect(assertPublicUrl(new URL("https://sneaky.example"), resolvesTo("10.0.0.5"))).rejects.toThrow(/Private/);
     await expect(assertPublicUrl(new URL("https://localhost"), resolvesTo("93.184.216.34"))).rejects.toThrow(/Private/);
     await expect(assertPublicUrl(new URL("https://[::1]/x"), resolvesTo("93.184.216.34"))).rejects.toThrow(/Private/);
+    await expect(assertPublicUrl(new URL("https://[::ffff:127.0.0.1]/x"), resolvesTo("93.184.216.34"))).rejects.toThrow(/Private/);
+    await expect(assertPublicUrl(new URL("https://[::ffff:169.254.169.254]/x"), resolvesTo("93.184.216.34"))).rejects.toThrow(/Private/);
   });
 
   it("rejects when any resolved address is private", async () => {

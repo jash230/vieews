@@ -160,7 +160,7 @@ export function registerTools(server: McpServer) {
     "import_media_from_url",
     {
       title: "Import media from URL",
-      description: "Downloads a public https URL (MP4/MOV/JPEG/PNG/WebP, up to 1 GB) into Vieews and returns a ready asset_id.",
+      description: "Downloads a public https URL (MP4/MOV/JPEG/PNG/WebP, up to 50 MB) into Vieews and returns a ready asset_id.",
       inputSchema: z.object({ url: z.string().url() }),
     },
     tool(async ({ url }: { url: string }, userId) => {

@@ -111,6 +111,23 @@ async function getPending(userId: string, proposalId: string): Promise<ProposalR
   return data as ProposalRow;
 }
 
+/**
+ * Takes the decision for this request before acting, so a double-click or a second tab can't
+ * create the post twice. A claim older than two minutes counts as abandoned (the request died).
+ */
+async function claim(row: ProposalRow): Promise<void> {
+  const abandoned = new Date(Date.now() - 2 * 60_000).toISOString();
+  const { data, error } = await supabaseAdmin()
+    .from("copilot_proposals")
+    .update({ decided_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .eq("status", "pending")
+    .or(`decided_at.is.null,decided_at.lt.${abandoned}`)
+    .select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("This was already decided");
+}
+
 async function decide(row: ProposalRow, status: ProposalStatus, result: ProposalView["result"]): Promise<ProposalView> {
   const { data, error } = await supabaseAdmin()
     .from("copilot_proposals")
@@ -126,6 +143,7 @@ async function decide(row: ProposalRow, status: ProposalStatus, result: Proposal
 /** The user pressed Approve: create the post exactly as proposed. */
 export async function approveProposal(userId: string, proposalId: string): Promise<ProposalView> {
   const row = await getPending(userId, proposalId);
+  await claim(row);
   try {
     const input = { ...row.input, projectId: row.project_id, meta: { source: "copilot", reason: row.input.reason ?? null } };
     delete input.reason;
@@ -139,7 +157,9 @@ export async function approveProposal(userId: string, proposalId: string): Promi
 }
 
 export async function declineProposal(userId: string, proposalId: string): Promise<ProposalView> {
-  return decide(await getPending(userId, proposalId), "declined", null);
+  const row = await getPending(userId, proposalId);
+  await claim(row);
+  return decide(row, "declined", null);
 }
 
 /** Decisions the copilot hasn't heard about yet, as lines for the next user message. Marks them reported. */
