@@ -41,12 +41,14 @@ async function ttJson(res: Response, what: string) {
 }
 
 /**
- * TikTok chunk rules: chunks are 5–64 MB; files under 5 MB go in one chunk;
+ * TikTok chunk rules: chunks are 5–64 MB; files under 5 MB (or under one chunk) go up whole;
  * the last chunk absorbs the remainder (so it may be up to 128 MB).
  */
 export function tiktokChunkPlan(size: number, preferred = 10 * MB): { chunkSize: number; totalChunks: number } {
   if (size <= 5 * MB) return { chunkSize: size, totalChunks: 1 };
   const chunkSize = Math.min(Math.max(preferred, 5 * MB), 64 * MB);
+  // chunk_size may not exceed the file, so a file smaller than one chunk goes up whole.
+  if (size < chunkSize) return { chunkSize: size, totalChunks: 1 };
   return { chunkSize, totalChunks: Math.max(1, Math.floor(size / chunkSize)) };
 }
 

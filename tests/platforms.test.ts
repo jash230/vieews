@@ -146,7 +146,7 @@ describe("TikTok", () => {
     expect(tiktokChunkPlan(25 * MB)).toEqual({ chunkSize: 10 * MB, totalChunks: 2 });
     const plan = tiktokChunkPlan(25 * MB);
     expect(chunkRange(1, plan, 25 * MB)).toEqual({ start: 10 * MB, end: 25 * MB - 1 }); // last chunk takes the remainder
-    expect(tiktokChunkPlan(7 * MB)).toEqual({ chunkSize: 10 * MB, totalChunks: 1 });
+    expect(tiktokChunkPlan(7 * MB)).toEqual({ chunkSize: 7 * MB, totalChunks: 1 }); // never a chunk bigger than the file
   });
 
   const creator = { creator_username: "zaza", creator_nickname: "Zaza", privacy_level_options: ["SELF_ONLY", "PUBLIC_TO_EVERYONE"], comment_disabled: true, duet_disabled: false, stitch_disabled: false, max_video_post_duration_sec: 600 };
