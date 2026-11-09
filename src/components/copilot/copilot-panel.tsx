@@ -89,10 +89,33 @@ export function CopilotPanel({
   // The overlay (below lg) behaves like a dialog: focus goes to the input, Escape closes it.
   useEffect(() => {
     if (!mobileOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     aside.current?.querySelector<HTMLElement>("textarea, input")?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return setMobileOpen(false);
+      // aria-modal: keep Tab inside the panel instead of wandering into the page behind it.
+      if (e.key !== "Tab" || !aside.current) return;
+      const focusable = [
+        ...aside.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+      ].filter((el) => el.offsetParent !== null);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const inside = aside.current.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Give focus back to whatever opened it (the Copilot button).
+      if (opener?.isConnected) opener.focus();
+    };
   }, [mobileOpen, setMobileOpen]);
 
   function onScroll() {

@@ -323,15 +323,26 @@ export function Composer({
 
   // TikTok requires showing live creator info before posting. Fetch once per account, not once per render.
   const creatorInfoRequested = useRef(new Set<string>());
+  const [creatorInfoAttempt, setCreatorInfoAttempt] = useState(0);
   useEffect(() => {
     for (const a of tiktokAccounts) {
       if (creatorInfoRequested.current.has(a.id)) continue;
       creatorInfoRequested.current.add(a.id);
-      tiktokCreatorInfoAction(a.id).then((res) =>
-        setCreatorInfo((prev) => ({ ...prev, [a.id]: res.ok ? res.data : { error: res.error } })),
-      );
+      tiktokCreatorInfoAction(a.id)
+        .then((res) => setCreatorInfo((prev) => ({ ...prev, [a.id]: res.ok ? res.data : { error: res.error } })))
+        // A network failure would otherwise leave "Loading TikTok account settings…" up forever.
+        .catch(() => setCreatorInfo((prev) => ({ ...prev, [a.id]: { error: "Couldn't load your TikTok settings." } })));
     }
-  }, [tiktokAccounts]);
+  }, [tiktokAccounts, creatorInfoAttempt]);
+  const tiktokInfoFailed = tiktokAccounts.filter((a) => {
+    const info = creatorInfo[a.id];
+    return !!info && "error" in info;
+  });
+  function retryCreatorInfo() {
+    for (const a of tiktokInfoFailed) creatorInfoRequested.current.delete(a.id);
+    setCreatorInfo((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !tiktokInfoFailed.some((a) => a.id === id))));
+    setCreatorInfoAttempt((n) => n + 1);
+  }
 
   const tiktokInfos = tiktokAccounts.map((a) => creatorInfo[a.id]).filter((i): i is TikTokCreatorInfo => !!i && !("error" in i));
   const tiktokPrivacyOptions = tiktokInfos.length
@@ -357,8 +368,24 @@ export function Composer({
   useEffect(() => {
     if (!items.length || submitted) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    // In-app links (the sidebar, the dashboard) skip beforeunload, so ask before those too.
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = (e.target as Element | null)?.closest?.("a[href]");
+      if (!(link instanceof HTMLAnchorElement) || link.target === "_blank" || link.hasAttribute("download")) return;
+      const url = new URL(link.href, location.href);
+      if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
+      if (!confirm("Leave this page? Your upload and caption haven't been posted and will be lost.")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
   }, [items.length, submitted]);
 
   /** A post is one video, or 1–35 photos (a carousel when there's more than one). */
@@ -775,6 +802,12 @@ export function Composer({
               {platforms.includes("tiktok") && (
                 <div className="space-y-4">
                   <h3 className="flex items-center gap-2 font-semibold"><PlatformIcon platform="tiktok" />TikTok</h3>
+                  {tiktokInfoFailed.length > 0 && (
+                    <Notice tone="error" className="flex flex-wrap items-center justify-between gap-3">
+                      <span>Couldn&apos;t load TikTok account settings, which TikTok requires before posting.</span>
+                      <Button type="button" size="sm" variant="secondary" onClick={retryCreatorInfo}>Retry</Button>
+                    </Notice>
+                  )}
                   {tiktokInfos.length > 0 && (
                     <p className="text-sm text-muted-foreground">
                       Posting as <span className="font-semibold text-foreground">{tiktokInfos.map((i) => i.creatorNickname || `@${i.creatorUsername}`).join(", ")}</span>

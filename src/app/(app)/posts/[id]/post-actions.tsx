@@ -57,7 +57,7 @@ export function CancelPostButton({ postId }: { postId: string }) {
       variant="destructive"
       loading={pending}
       onClick={() => {
-        if (!confirm("Cancel this scheduled post? It won't be published anywhere.")) return;
+        if (!confirm("Stop this post from going out? It won't be published anywhere.\n\nOK stops it. Cancel keeps it scheduled.")) return;
         start(async () => {
           const res = await cancelPostAction(postId);
           if (res.ok) toast.success("Post canceled", { description: "It won't be published anywhere." });

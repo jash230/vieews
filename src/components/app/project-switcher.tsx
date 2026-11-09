@@ -69,7 +69,7 @@ export function ProjectSwitcher({
 
   const chip = variant === "chip";
   return (
-    <div ref={root} className={cn("relative", className)}>
+    <div ref={root} className={cn("relative min-w-0", className)}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -81,7 +81,7 @@ export function ProjectSwitcher({
           "flex min-w-0 items-center gap-2 text-left transition-colors duration-150",
           chip
             ? "min-h-9 max-w-[12rem] rounded-full border border-border bg-background py-1 pl-1 pr-2.5 text-xs font-bold hover:border-border-strong"
-            : "min-h-11 max-w-[16rem] rounded-2xl px-2 hover:bg-primary-soft",
+            : "min-h-11 w-full max-w-[16rem] rounded-2xl px-2 hover:bg-primary-soft",
         )}
       >
         {current ? <ProjectIcon name={current.name} url={current.iconUrl} size={chip ? 24 : 32} /> : <span className="grid size-8 place-items-center rounded-xl bg-muted"><Plus className="size-4" aria-hidden /></span>}

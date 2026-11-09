@@ -80,13 +80,15 @@ export function ChatInput({
                   <span className="absolute inset-0 grid place-items-center bg-foreground/40"><Loader variant="dots" size={14} label="Uploading" /></span>
                 )}
                 {a.state.status === "error" && (
-                  <span className="absolute inset-0 grid place-items-center bg-destructive/70 text-[10px] font-bold text-white" title={a.state.error}>Failed</span>
+                  <span className="absolute inset-0 grid place-items-center bg-destructive/70 text-[10px] font-bold text-white" title={a.state.error}>
+                    Failed<span className="sr-only">: {a.state.error}</span>
+                  </span>
                 )}
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(a.key)}
                   aria-label={`Remove ${a.file.name}`}
-                  className="absolute right-0.5 top-0.5 grid size-5 place-items-center rounded-full bg-foreground/70 text-white"
+                  className="absolute right-0.5 top-0.5 grid size-5 place-items-center rounded-full bg-foreground/70 text-white after:absolute after:-inset-2.5 after:content-['']"
                 >
                   <X className="size-3" aria-hidden />
                 </button>
@@ -94,6 +96,14 @@ export function ChatInput({
             ))}
           </ul>
         )}
+        {(() => {
+          const failed = attachments.find((a) => a.state.status === "error");
+          return failed && failed.state.status === "error" ? (
+            <p role="alert" className="px-3 pt-1.5 text-xs text-destructive">
+              {failed.file.name}: {failed.state.error}
+            </p>
+          ) : null;
+        })()}
         <label htmlFor="copilot-input" className="sr-only">Message the copilot</label>
         <textarea
           id="copilot-input"

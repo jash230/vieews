@@ -110,33 +110,41 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
           <EmptyState icon={<KeyRound />} title="No keys yet" description="Create a key above to let an AI agent post for you." />
         ) : (
           <ul className="divide-y divide-border">
-            {keys.map((k) => (
-              <li key={k.id} className="flex items-center gap-4 px-5 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{k.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
-                  </p>
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
-                    start(async () => {
-                      const res = await revokeApiKeyAction(k.id);
-                      if (res.ok) toast.success(`Revoked "${k.name}"`);
-                      else setError(res.error);
-                    });
-                  }}
-                >
-                  <Trash2 aria-hidden /> Revoke
-                </Button>
-              </li>
-            ))}
+            {keys.map((k) => <KeyRow key={k.id} k={k} />)}
           </ul>
         )}
       </Card>
     </div>
+  );
+}
+
+/** One key, with its own pending state so revoking one doesn't spin or disable the rest of the page. */
+function KeyRow({ k }: { k: KeyView }) {
+  const [pending, start] = useTransition();
+  return (
+    <li className="flex items-center gap-4 px-5 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">{k.name}</p>
+        <p className="text-xs text-muted-foreground">
+          <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
+        </p>
+      </div>
+      <Button
+        variant="destructive"
+        size="sm"
+        loading={pending}
+        aria-label={`Revoke ${k.name}`}
+        onClick={() => {
+          if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
+          start(async () => {
+            const res = await revokeApiKeyAction(k.id);
+            if (res.ok) toast.success(`Revoked "${k.name}"`);
+            else toast.error(res.error);
+          });
+        }}
+      >
+        {!pending && <Trash2 aria-hidden />} Revoke
+      </Button>
+    </li>
   );
 }

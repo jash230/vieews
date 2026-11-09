@@ -158,6 +158,11 @@ function HoldToApprove({ label, onConfirm, disabled }: { label: string; onConfir
           }
         }}
         onKeyUp={(e) => (e.key === " " || e.key === "Enter") && stop()}
+        // Screen readers and switch devices send a plain click (detail 0) and can't hold: treat it as confirmed.
+        // Real keyboard presses never get here, since keydown above prevents their click.
+        onClick={(e) => {
+          if (e.detail === 0 && !disabled) onConfirm();
+        }}
         onPointerDown={start}
         onPointerUp={stop}
         onPointerLeave={stop}

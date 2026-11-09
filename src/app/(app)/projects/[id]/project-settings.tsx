@@ -68,10 +68,11 @@ function useSave(success: string) {
   return { pending, error, save };
 }
 
-function SaveRow({ pending, error, label = "Save" }: { pending: boolean; error: string | null; label?: string }) {
+function SaveRow({ pending, error, label = "Save", dirty = false }: { pending: boolean; error: string | null; label?: string; dirty?: boolean }) {
   return (
-    <div className="flex items-center gap-3 pt-2">
+    <div className="flex flex-wrap items-center gap-3 pt-2">
       <Button type="submit" loading={pending}>{label}</Button>
+      {dirty && !error && !pending && <p role="status" className="text-sm font-medium text-warning">Unsaved changes</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
   );
@@ -206,6 +207,9 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const { pending, error, save } = useSave("Images saved");
+  // Added, removed, reordered or relabeled images only stick once saved, so say when there's something to save.
+  const strip = (list: MediaItem[]) => JSON.stringify(list.map(({ id, role, shows, tags }) => ({ id, role, shows, tags })));
+  const dirty = strip(items) !== strip(initial);
 
   const update = (mediaId: string, patch: Partial<MediaItem>) => setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, ...patch } : m)));
   const moveUp = (index: number) =>
@@ -314,7 +318,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
               })}
             </ul>
           )}
-          <SaveRow pending={pending} error={error} label="Save images" />
+          <SaveRow pending={pending} error={error} label="Save images" dirty={dirty} />
         </form>
       </CardBody>
     </Card>
