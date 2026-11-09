@@ -198,7 +198,20 @@ export async function purgeFinishedMedia(): Promise<number> {
   for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
   for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
 
-  const purgeable = assets.filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  // Project media (logo, screens, photos, icon) is kept for as long as the project uses it.
+  const ids = assets.map((a) => a.id as string);
+  const [{ data: projectMedia, error: pmErr }, { data: icons, error: iconErr }] = await Promise.all([
+    db.from("project_media").select("media_asset_id").in("media_asset_id", ids),
+    db.from("projects").select("icon_asset_id").in("icon_asset_id", ids),
+  ]);
+  // If we can't tell what projects use, purge nothing this run rather than risk deleting it.
+  if (pmErr || iconErr) throw pmErr ?? iconErr;
+  const keep = new Set<string>([
+    ...(projectMedia ?? []).map((r) => r.media_asset_id as string),
+    ...(icons ?? []).map((r) => r.icon_asset_id as string),
+  ]);
+
+  const purgeable = assets.filter((a) => !keep.has(a.id as string) && isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
   for (const asset of purgeable) {
     await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
   }

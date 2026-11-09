@@ -59,8 +59,15 @@ export async function saveConnectedAccount(userId: string, platform: Platform, t
 }
 
 export async function disconnectAccount(userId: string, accountId: string) {
-  const { error } = await supabaseAdmin().from("social_accounts").delete().eq("user_id", userId).eq("id", accountId);
+  const db = supabaseAdmin();
+  // Its post targets cascade away, so re-derive those posts' status afterwards (or they'd stay "publishing").
+  const { data: affected } = await db.from("post_targets").select("post_id").eq("social_account_id", accountId);
+  const { error } = await db.from("social_accounts").delete().eq("user_id", userId).eq("id", accountId);
   if (error) throw error;
+  const { refreshPostStatus } = await import("@/lib/posts/service");
+  for (const postId of new Set((affected ?? []).map((t) => t.post_id as string))) {
+    await refreshPostStatus(postId).catch((err) => console.error(err));
+  }
 }
 
 export async function markNeedsReauth(accountId: string, message: string) {

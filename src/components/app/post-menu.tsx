@@ -3,11 +3,11 @@
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { canDeletePost } from "@/lib/posts/deletable";
-import type { PostRow } from "@/lib/types";
+import type { PostRow, PostTargetRow } from "@/lib/types";
 import { deletePostNow } from "./deleted-posts";
 
 /** The "..." menu at the end of a post row. */
-export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "updated_at"> }) {
+export function PostMenu({ post }: { post: Pick<PostRow, "id" | "status" | "updated_at"> & { targets?: Pick<PostTargetRow, "status" | "started_at">[] } }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const deletable = canDeletePost(post);

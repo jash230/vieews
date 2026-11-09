@@ -80,7 +80,10 @@ export async function findStalledPosts(): Promise<string[]> {
     .from("posts")
     .select("id, status, scheduled_for, updated_at, targets:post_targets(status)")
     .in("status", ["scheduled", "publishing"])
+    // Only overdue scheduled posts or publishing ones: future scheduled posts would crowd them out of the limit.
+    .or(`status.eq.publishing,scheduled_for.lt."${new Date(Date.now() - HEAL_AFTER_MS).toISOString()}"`)
     .lt("updated_at", new Date(Date.now() - HEAL_AFTER_MS).toISOString())
+    .order("updated_at")
     .limit(100);
   const posts = (data ?? []) as unknown as (Parameters<typeof needsRestart>[0] & { id: string })[];
   return posts.filter((p) => needsRestart(p)).map((p) => p.id);
@@ -96,18 +99,31 @@ export type PublishPlan =
 /** Decides whether a post is due, and if so marks it publishing and lists what's left to post. */
 export async function planPublish(postId: string): Promise<PublishPlan> {
   const db = supabaseAdmin();
-  const { data: post } = await db.from("posts").select("status, scheduled_for").eq("id", postId).maybeSingle();
+  // A database error must throw (so the step retries), not read as "the post is gone".
+  const { data: post, error: postErr } = await db.from("posts").select("status, scheduled_for").eq("id", postId).maybeSingle();
+  if (postErr) throw new Error(postErr.message);
   if (!post || post.status === "canceled") return { kind: "skip" };
   // Re-read on every wake-up, so a canceled, deleted or rescheduled post is never published early.
   if (post.scheduled_for && new Date(post.scheduled_for).getTime() > Date.now()) return { kind: "wait", until: post.scheduled_for };
 
-  const { data: pending } = await db.from("post_targets").select("id, social_account_id").eq("post_id", postId).eq("status", "pending").order("created_at");
+  const { data: pending, error: pendingErr } = await db
+    .from("post_targets")
+    .select("id, social_account_id")
+    .eq("post_id", postId)
+    .eq("status", "pending")
+    .order("created_at");
+  if (pendingErr) throw new Error(pendingErr.message);
   // Nothing left (another run got there first): derive the status instead of leaving it "publishing".
   if (!pending?.length) {
     await refreshPostStatus(postId);
     return { kind: "skip" };
   }
-  if (post.status !== "publishing") await db.from("posts").update({ status: "publishing" }).eq("id", postId);
+  if (post.status !== "publishing") {
+    // Only from the status we read: a cancel that lands in between wins instead of being overwritten.
+    const { data: moved, error: moveErr } = await db.from("posts").update({ status: "publishing" }).eq("id", postId).eq("status", post.status).select("id");
+    if (moveErr) throw new Error(moveErr.message);
+    if (!moved?.length) return { kind: "skip" };
+  }
   const byAccount = new Map<string, string[]>();
   for (const t of pending) byAccount.set(t.social_account_id as string, [...(byAccount.get(t.social_account_id as string) ?? []), t.id as string]);
   return { kind: "go", byAccount: [...byAccount.values()] };
@@ -126,14 +142,15 @@ export async function failTarget(targetId: string, message: string) {
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("id", targetId)
     .select("post_id")
-    .single();
+    .maybeSingle();
   if (data) await refreshPostStatus(data.post_id);
 }
 
 /** Moves a pending target to uploading. False when it's gone or someone else already claimed it. */
 export async function claimTarget(targetId: string): Promise<boolean> {
   const db = supabaseAdmin();
-  const { data: target } = await db.from("post_targets").select("status, attempts").eq("id", targetId).single();
+  const { data: target, error: readErr } = await db.from("post_targets").select("status, attempts").eq("id", targetId).maybeSingle();
+  if (readErr) throw new Error(readErr.message);
   if (!target || target.status !== "pending") return false;
   const { data } = await db
     .from("post_targets")
@@ -161,13 +178,16 @@ async function loadItems(post: PostRow): Promise<MediaAssetRow[]> {
 export async function publishClaimedTarget(targetId: string, steps: StepRunner): Promise<PublishResult> {
   const db = supabaseAdmin();
   // Rows are re-read on every invocation (they're cheap) so tokens never land in step state.
-  const { data: targetRow } = await db.from("post_targets").select("*").eq("id", targetId).single();
+  // Read errors are plain Errors (retried); only a row that is really gone is non-retriable.
+  const { data: targetRow, error: targetErr } = await db.from("post_targets").select("*").eq("id", targetId).maybeSingle();
+  if (targetErr) throw new Error(targetErr.message);
   if (!targetRow) throw new NonRetriableError("Target no longer exists");
   const target = targetRow as PostTargetRow;
-  const [{ data: postRow }, { data: accountRow }] = await Promise.all([
-    db.from("posts").select("*").eq("id", target.post_id).single(),
-    db.from("social_accounts").select("*").eq("id", target.social_account_id).single(),
+  const [{ data: postRow, error: postErr }, { data: accountRow, error: accountErr }] = await Promise.all([
+    db.from("posts").select("*").eq("id", target.post_id).maybeSingle(),
+    db.from("social_accounts").select("*").eq("id", target.social_account_id).maybeSingle(),
   ]);
+  if (postErr || accountErr) throw new Error((postErr ?? accountErr)!.message);
   if (!postRow) throw new NonRetriableError("Post no longer exists");
   if (!accountRow) throw new NonRetriableError("This account was disconnected");
   const post = postRow as PostRow;

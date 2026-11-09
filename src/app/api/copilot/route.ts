@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     if (err instanceof ProjectNotFoundError) return Response.json({ error: "Project not found" }, { status: 404 });
     throw err;
   }
-  const timeZone = Intl.supportedValuesOf("timeZone").includes(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
+  const timeZone = isValidTimeZone(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
 
   const encoder = new TextEncoder();
   const events = runTurn({ userId, projectId, text: text.trim(), attachments, timeZone, signal: req.signal });
@@ -42,4 +42,14 @@ export async function POST(req: Request) {
     },
   });
   return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" } });
+}
+
+/** supportedValuesOf leaves out valid names browsers send (Asia/Kolkata, Europe/Kyiv, UTC), so ask Intl directly. */
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }

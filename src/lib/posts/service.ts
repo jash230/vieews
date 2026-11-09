@@ -208,7 +208,10 @@ export async function cancelPost(userId: string, postId: string) {
   const post = await getPost(userId, postId);
   if (post.status !== "scheduled") throw new Error("Only scheduled posts can be canceled");
   const db = supabaseAdmin();
-  await db.from("posts").update({ status: "canceled" }).eq("id", postId).eq("status", "scheduled");
+  const { data: canceled, error } = await db.from("posts").update({ status: "canceled" }).eq("id", postId).eq("status", "scheduled").select("id");
+  if (error) throw error;
+  // It started publishing in the meantime: leave its targets alone so it isn't stuck half-canceled.
+  if (!canceled?.length) throw new Error("This post already started publishing, so it can't be canceled.");
   await db.from("post_targets").update({ status: "canceled" }).eq("post_id", postId).eq("status", "pending");
   // Its workflow re-reads the post when it wakes at the scheduled time, sees it's canceled and stops.
 }
@@ -233,9 +236,12 @@ export async function retryTarget(userId: string, targetId: string) {
   const post = await getPost(userId, target.post_id);
   if (post.items.some((m) => m.purged_at)) throw new Error("This post's media was cleaned up to free storage. Create a new post instead.");
   await db.from("post_targets").update({ status: "pending", error: null, finished_at: null }).eq("id", targetId);
-  await db.from("posts").update({ status: "publishing" }).eq("id", target.post_id);
+  // A scheduled post whose workflow failed to start: retrying puts it back on schedule, not out right now.
+  const stillScheduled = !!post.scheduled_for && new Date(post.scheduled_for).getTime() > Date.now();
+  await db.from("posts").update({ status: stillScheduled ? "scheduled" : "publishing" }).eq("id", target.post_id);
   try {
-    await startRetryTarget(targetId);
+    if (stillScheduled) await startPublishPost(target.post_id);
+    else await startRetryTarget(targetId);
   } catch (err) {
     console.error(err);
     const { failTarget } = await import("./publish");

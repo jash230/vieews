@@ -144,8 +144,23 @@ const PAGE_LIMIT = 3 * 1024 * 1024;
 async function getText(url: string, lookup?: Lookup): Promise<string> {
   const res = await safeFetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; VieewsBot/1.0)", "accept-language": "en" } }, { lookup });
   if (!res.ok) throw new Error(`Couldn't open that link (${res.status})`);
-  const text = await res.text();
-  return text.length > PAGE_LIMIT ? text.slice(0, PAGE_LIMIT) : text;
+  // Stream and stop at the limit, so a huge (or endless) response can't exhaust memory.
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    text += decoder.decode(value, { stream: true });
+    if (bytes >= PAGE_LIMIT) {
+      await reader.cancel().catch(() => {});
+      return text.slice(0, PAGE_LIMIT);
+    }
+  }
+  return text + decoder.decode();
 }
 
 /** Fetches a pasted link and returns what it says about the app. */
