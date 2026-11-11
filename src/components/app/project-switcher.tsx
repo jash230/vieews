@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDiscardUnsaved } from "@/components/app/unsaved-guard";
 import { Check, ChevronsUpDown, Plus, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -55,6 +56,8 @@ export function ProjectSwitcher({
 
   function pick(id: string) {
     if (id === currentId) return setOpen(false);
+    // Switching reloads the page's data, which would wipe an unposted upload in the composer.
+    if (!confirmDiscardUnsaved()) return;
     setSwitching(id);
     start(async () => {
       const res = await switchProjectAction(id);
@@ -80,7 +83,7 @@ export function ProjectSwitcher({
         className={cn(
           "flex min-w-0 items-center gap-2 text-left transition-colors duration-150",
           chip
-            ? "min-h-9 max-w-[12rem] rounded-full border border-border bg-background py-1 pl-1 pr-2.5 text-xs font-bold hover:border-border-strong"
+            ? "min-h-10 max-w-[12rem] rounded-full border border-border bg-background py-1 pl-1 pr-2.5 text-xs font-bold hover:border-border-strong"
             : "min-h-11 w-full max-w-[16rem] rounded-2xl px-2 hover:bg-primary-soft",
         )}
       >

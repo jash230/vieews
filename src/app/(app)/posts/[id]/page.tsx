@@ -11,7 +11,7 @@ import { signedReadUrls } from "@/lib/media/service";
 import { canDeletePost } from "@/lib/posts/deletable";
 import { healStalledPost } from "@/lib/posts/publish";
 import { getPost, progressKey, type PostWithTargets } from "@/lib/posts/service";
-import { AutoRefresh, CancelPostButton, DeletePostButton, PostVideo, RetryButton } from "./post-actions";
+import { AutoRefresh, CancelPostButton, RefreshWhenDue, DeletePostButton, PostVideo, RetryButton } from "./post-actions";
 
 // The title and the page both need the post: read it once per request.
 const loadPost = cache((userId: string, id: string) => getPost(userId, id));
@@ -36,6 +36,11 @@ function optionSummary(t: PostWithTargets["targets"][number], photos: number): s
   return photos ? `${photos > 1 ? `${photos} photos` : "Photo"} · ${visibility}` : visibility;
 }
 
+/** Whether a time has passed, at request time (a server component renders once per request). */
+function isPast(iso: string | null): boolean {
+  return !!iso && new Date(iso).getTime() <= Date.now();
+}
+
 export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
   const { userId } = await auth.protect();
   const { id } = await params;
@@ -46,12 +51,15 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
   const urls = await signedReadUrls(live.map((m) => m.storage_path)).catch(() => ({}) as Record<string, string>);
   const mediaUrl = post.media && !post.media.purged_at ? urls[post.media.storage_path] ?? null : null;
   const photos = post.items.every((m) => m.kind === "image") ? post.items.length : 0;
-  const inFlight = post.status === "publishing";
+  // A scheduled post past its time is about to start: watch it like one that's publishing.
+  const due = post.status === "scheduled" && isPast(post.scheduled_for);
+  const inFlight = post.status === "publishing" || due;
   healStalledPost(post);
 
   return (
     <>
       {inFlight && <AutoRefresh postId={post.id} initial={progressKey(post.status, post.targets)} />}
+      {post.status === "scheduled" && !due && post.scheduled_for && <RefreshWhenDue at={post.scheduled_for} />}
       <Link href="/posts" className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> All posts
       </Link>

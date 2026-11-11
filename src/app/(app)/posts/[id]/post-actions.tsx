@@ -8,6 +8,19 @@ import { deletePostNow } from "@/components/app/deleted-posts";
 import { toast } from "@/components/ui/toast";
 import { cancelPostAction, postProgressAction, retryTargetAction } from "../../actions";
 
+/** Re-renders the page when a scheduled post is due, so it doesn't sit on "Scheduled" after going out. */
+export function RefreshWhenDue({ at }: { at: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    const wait = new Date(at).getTime() - Date.now() + 3000;
+    // Only for posts due within a day: a further-off tab will be reloaded long before then.
+    if (wait > 24 * 60 * 60 * 1000) return;
+    const id = setTimeout(() => router.refresh(), Math.max(wait, 0));
+    return () => clearTimeout(id);
+  }, [router, at]);
+  return null;
+}
+
 /**
  * While publishing, polls a small status check and re-renders the page only when a status actually
  * changes, so the video and the rest of the page stay put in between.

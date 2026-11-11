@@ -4,6 +4,7 @@ import { ArrowUp, ImagePlus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, useTransition } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
+import { useUnsavedGuard } from "@/components/app/unsaved-guard";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/form";
@@ -96,7 +97,7 @@ export function ProjectSettings({ project, media, accounts, linked }: Props) {
 function KitForm({ project }: { project: Props["project"] }) {
   const id = useId();
   const k = project.kit;
-  const [f, setF] = useSynced({
+  const server = {
     name: project.name,
     storeUrl: project.storeUrl ?? "",
     oneLiner: k.oneLiner,
@@ -111,7 +112,10 @@ function KitForm({ project }: { project: Props["project"] }) {
     personas: k.personas.join("\n"),
     hashtags: k.hashtags.join(", "),
     notes: project.notes,
-  });
+  };
+  const [f, setF] = useSynced(server);
+  const dirty = !same(f, server);
+  useUnsavedGuard(dirty, "Leave without saving? Your changes to the project details will be lost.");
   const set = (key: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [key]: e.target.value });
   const { pending, error, save } = useSave("Project details saved");
 
@@ -191,7 +195,7 @@ function KitForm({ project }: { project: Props["project"] }) {
             <Textarea id={`${id}-notes`} value={f.notes} onChange={set("notes")} className="min-h-20" />
           </Field>
           <div className="sm:col-span-2">
-            <SaveRow pending={pending} error={error} />
+            <SaveRow pending={pending} error={error} dirty={dirty} />
           </div>
         </form>
       </CardBody>
@@ -210,6 +214,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
   // Added, removed, reordered or relabeled images only stick once saved, so say when there's something to save.
   const strip = (list: MediaItem[]) => JSON.stringify(list.map(({ id, role, shows, tags }) => ({ id, role, shows, tags })));
   const dirty = strip(items) !== strip(initial);
+  useUnsavedGuard(dirty || uploading > 0, "Leave without saving? Your changes to the project images will be lost.");
 
   const update = (mediaId: string, patch: Partial<MediaItem>) => setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, ...patch } : m)));
   const moveUp = (index: number) =>
@@ -277,10 +282,10 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center gap-1">
                         <select
-                          aria-label="Kind"
+                          aria-label={`Kind of image ${i + 1}`}
                           value={m.role}
                           onChange={(e) => update(m.id, { role: e.target.value as ProjectMediaRole })}
-                          className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold"
+                          className="min-h-11 rounded-lg border border-border bg-background px-2 text-xs font-semibold"
                         >
                           <option value="screen">Screen</option>
                           <option value="logo">Logo</option>
@@ -289,23 +294,24 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
                         <button
                           type="button"
                           aria-pressed={magic}
+                          aria-label={`Magic moment: image ${i + 1}`}
                           onClick={() => update(m.id, { tags: magic ? m.tags.filter((t) => t !== "magic") : [...m.tags, "magic"] })}
                           className={cn(
-                            "min-h-9 rounded-lg border px-2 text-xs font-bold",
+                            "min-h-11 rounded-lg border px-2 text-xs font-bold",
                             magic ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground",
                           )}
                         >
                           Magic
                         </button>
                         <span className="flex-1" />
-                        <button type="button" aria-label="Move earlier" disabled={i === 0} onClick={() => moveUp(i)} className="grid size-9 place-items-center rounded-lg text-subtle-foreground hover:bg-primary-soft disabled:opacity-30">
+                        <button type="button" aria-label={`Move image ${i + 1} earlier`} disabled={i === 0} onClick={() => moveUp(i)} className="grid size-11 place-items-center rounded-lg text-subtle-foreground hover:bg-primary-soft disabled:opacity-30">
                           <ArrowUp className="size-4" aria-hidden />
                         </button>
-                        <button type="button" aria-label="Remove" onClick={() => setItems((prev) => prev.filter((x) => x.id !== m.id))} className="grid size-9 place-items-center rounded-lg text-subtle-foreground hover:bg-destructive-soft hover:text-destructive">
+                        <button type="button" aria-label={`Remove image ${i + 1}`} onClick={() => setItems((prev) => prev.filter((x) => x.id !== m.id))} className="grid size-11 place-items-center rounded-lg text-subtle-foreground hover:bg-destructive-soft hover:text-destructive">
                           <X className="size-4" aria-hidden />
                         </button>
                       </div>
-                      <label className="sr-only" htmlFor={`${id}-${m.id}`}>What it shows</label>
+                      <label className="sr-only" htmlFor={`${id}-${m.id}`}>What image {i + 1} shows</label>
                       <Textarea
                         id={`${id}-${m.id}`}
                         value={m.shows}
@@ -398,10 +404,11 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
           onClick={() => {
             if (!confirm(`Delete ${name}? Its copilot chat and settings are removed for good.`)) return;
             start(async () => {
-              const res = await deleteProjectAction(projectId);
+              const res = await deleteProjectAction(projectId).catch(() => ({ ok: false as const, error: "Couldn't reach Vieews. Check your connection and try again." }));
               if (!res.ok) return setError(res.error);
               toast.success(`Deleted ${name}`);
-              router.push("/projects");
+              // replace, not push: Back would land on the deleted project's 404.
+              router.replace("/projects");
             });
           }}
         >

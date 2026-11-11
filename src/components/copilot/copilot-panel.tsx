@@ -12,7 +12,7 @@ import { Loader } from "@/components/ui/loader";
 import type { ChatItem, ChatMessage, CopilotEvent, ProposalView } from "@/lib/copilot/types";
 import { cn } from "@/lib/utils";
 import { ChatInput, type PendingAttachment } from "./chat-input";
-import { COPILOT_PANEL_ID, useCopilotUI, useStored } from "./copilot-ui";
+import { COPILOT_PANEL_ID, useCopilotUI, useSettled, useStored } from "./copilot-ui";
 import { PostApprovalCard, ToolRow } from "./tool-approval";
 
 const WIDTH_KEY = "vieews.copilot.width";
@@ -69,6 +69,7 @@ export function CopilotPanel({
   const stick = useRef(true);
   const aside = useRef<HTMLElement>(null);
   const [storedWidth, setStoredWidth] = useStored(WIDTH_KEY);
+  const settledUI = useSettled();
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -164,6 +165,11 @@ export function CopilotPanel({
 
   async function send(text = draft) {
     if (!project || streaming) return;
+    // Same rule as the Send button: sending now would silently drop a video that's still uploading.
+    if (attachments.some((a) => a.state.status === "uploading")) {
+      setError("Wait for your upload to finish, then send.");
+      return;
+    }
     const ids = attachments.flatMap((a) => (a.state.status === "done" ? [a.state.assetId] : []));
     if (!text.trim() && !ids.length) return;
     setError(null);
@@ -322,7 +328,7 @@ export function CopilotPanel({
           // From lg it's docked on the right; collapsing shrinks it toward the edge, so the content slides off-screen.
           "lg:relative lg:shrink-0 lg:overflow-hidden lg:border-border",
           collapsed ? "lg:invisible lg:w-0 lg:border-l-0" : "lg:w-[var(--copilot-w)] lg:border-l",
-          dragWidth !== null && "transition-none",
+          (dragWidth !== null || !settledUI) && "transition-none",
         )}
       >
         <div
@@ -364,7 +370,7 @@ export function CopilotPanel({
                             key={s}
                             type="button"
                             onClick={() => void send(s)}
-                            className="min-h-9 rounded-full border border-border bg-background px-3 text-left text-xs font-semibold text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+                            className="min-h-11 rounded-full border border-border bg-background px-3 text-left text-xs font-semibold text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
                           >
                             {s}
                           </button>

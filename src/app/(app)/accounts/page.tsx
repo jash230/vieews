@@ -10,6 +10,7 @@ import { isPlatformConfigured, PLATFORM_ENV } from "@/lib/env";
 import { cn } from "@/lib/utils";
 import { PLATFORMS, type Platform } from "@/lib/types";
 import { auth } from "@clerk/nextjs/server";
+import { ClearNoticeParams } from "./clear-notice-params";
 import { DisconnectButton } from "./disconnect-button";
 
 export const metadata = { title: "Accounts" };
@@ -48,10 +49,15 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
 
   return (
     <>
+      {(connected || error) && <ClearNoticeParams />}
       {connected && PLATFORM_META[connected] && (
         <Notice tone="success" className="mb-6">{PLATFORM_META[connected].label} connected.</Notice>
       )}
-      {error && <Notice tone="error" className="mb-6">{error}</Notice>}
+      {error && (
+        <Notice tone="error" className="mb-6">
+          <span className="font-semibold">Couldn&apos;t connect the account.</span> {error}
+        </Notice>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {PLATFORMS.map((platform, i) => {
@@ -113,11 +119,16 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
                     </a>
                   ) : (
                     <>
-                      <Button variant="secondary" disabled className="w-full">Not set up</Button>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                        Add {PLATFORM_ENV[platform].vars.map((v) => <code key={v} className="font-mono">{v} </code>)}
-                        to <code className="font-mono">.env.local</code> and restart. See SETUP.md step {PLATFORM_ENV[platform].setupStep}.
-                      </p>
+                      <Button variant="secondary" disabled className="w-full">{process.env.NODE_ENV === "production" ? "Coming soon" : "Not set up"}</Button>
+                      {process.env.NODE_ENV === "production" ? (
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{meta.label} isn&apos;t available yet.</p>
+                      ) : (
+                        // Setup steps are for whoever runs Vieews, not for people using it.
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                          Add {PLATFORM_ENV[platform].vars.map((v) => <code key={v} className="font-mono">{v} </code>)}
+                          to <code className="font-mono">.env.local</code> and restart. See SETUP.md step {PLATFORM_ENV[platform].setupStep}.
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

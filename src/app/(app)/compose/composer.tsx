@@ -5,6 +5,7 @@ import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronLe
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { PlatformBadge, PlatformIcon, PLATFORM_META } from "@/components/app/platform";
+import { useUnsavedGuard } from "@/components/app/unsaved-guard";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
@@ -368,29 +369,8 @@ export function Composer({
     return () => observer.disconnect();
   }, []);
 
-  // Warn before leaving with unsaved work.
-  useEffect(() => {
-    if (!items.length || submitted) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    // In-app links (the sidebar, the dashboard) skip beforeunload, so ask before those too.
-    const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const link = (e.target as Element | null)?.closest?.("a[href]");
-      if (!(link instanceof HTMLAnchorElement) || link.target === "_blank" || link.hasAttribute("download")) return;
-      const url = new URL(link.href, location.href);
-      if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
-      if (!confirm("Leave this page? Your upload and caption haven't been posted and will be lost.")) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [items.length, submitted]);
+  // Warn before leaving (or switching project) with unsaved work.
+  useUnsavedGuard(items.length > 0 && !submitted, "Leave this page? Your upload and caption haven't been posted and will be lost.");
 
   /** A post is one video, or 1–35 photos (a carousel when there's more than one). */
   async function pickFiles(list: FileList | null | undefined) {
@@ -555,6 +535,8 @@ export function Composer({
             accept={ACCEPT}
             multiple
             className="sr-only"
+            // The visible "Choose files" button opens it; don't make keyboard users Tab through an invisible control first.
+            tabIndex={-1}
             aria-label="Choose a video or photos"
             onChange={(e) => pickFiles(e.target.files)}
           />
