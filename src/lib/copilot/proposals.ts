@@ -173,7 +173,8 @@ export async function takeUnreportedDecisions(userId: string, projectId: string)
     .neq("status", "pending")
     .is("reported_at", null);
   if (error) throw error;
-  const rows = (data ?? []) as ProposalRow[];
+  // An approval still creating its post has no result yet: report it once it's known, not as "post undefined".
+  const rows = ((data ?? []) as ProposalRow[]).filter((r) => r.status !== "approved" || r.result);
   if (!rows.length) return [];
   await db.from("copilot_proposals").update({ reported_at: new Date().toISOString() }).in("id", rows.map((r) => r.id));
   return rows.map((r) =>

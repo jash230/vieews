@@ -124,8 +124,9 @@ export const tiktok: PlatformAdapter = {
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json.error) {
       throw new PlatformError(`TikTok refresh failed: ${json.error_description ?? json.error ?? res.status}`, {
-        retryable: res.status >= 500,
-        reauth: res.status < 500,
+        // Rate limited isn't a bad token: retry instead of asking the user to reconnect.
+        retryable: res.status >= 500 || res.status === 429,
+        reauth: res.status < 500 && res.status !== 429,
       });
     }
     return {

@@ -189,7 +189,9 @@ export async function purgeFinishedMedia(): Promise<number> {
   return purged;
 }
 
-const PURGE_BATCH = 500;
+// Small enough that the usage lookups stay well under PostgREST's 1,000-row cap per request.
+const PURGE_BATCH = 200;
+const ROW_CAP = 1000;
 
 async function purgeFinishedBatch(after: string | null): Promise<{ purged: number; last: string | null }> {
   const db = supabaseAdmin();
@@ -219,6 +221,10 @@ async function purgeFinishedBatch(after: string | null): Promise<{ purged: numbe
     db.from("projects").select("icon_asset_id").in("icon_asset_id", ids),
   ]);
   if (linksErr || coversErr || pmErr || iconErr) throw linksErr ?? coversErr ?? pmErr ?? iconErr;
+  // A capped answer may be missing the one post that still needs a file: don't guess.
+  if ([links, covers, projectMedia, icons].some((rows) => (rows?.length ?? 0) >= ROW_CAP)) {
+    throw new Error("Media usage lookup hit the row cap; skipping cleanup for this batch");
+  }
 
   const usage = new Map<string, PostUsage[]>();
   const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);

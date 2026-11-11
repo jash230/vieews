@@ -61,6 +61,10 @@ export async function saveConnectedAccount(userId: string, platform: Platform, t
 export async function disconnectAccount(userId: string, accountId: string) {
   const db = supabaseAdmin();
   // Its post targets cascade away, so re-derive those posts' status afterwards (or they'd stay "publishing").
+  // Only this user's account: otherwise a guessed id would re-derive someone else's posts.
+  const { data: owned, error: ownErr } = await db.from("social_accounts").select("id").eq("user_id", userId).eq("id", accountId).maybeSingle();
+  if (ownErr) throw ownErr;
+  if (!owned) return;
   const { data: affected } = await db.from("post_targets").select("post_id").eq("social_account_id", accountId);
   const { error } = await db.from("social_accounts").delete().eq("user_id", userId).eq("id", accountId);
   if (error) throw error;

@@ -27,17 +27,27 @@ interface MessageRow {
 
 /** How many rows are replayed to the model. Older turns stay visible in the panel. */
 const REPLAY_ROWS = 80;
+/** Rows read for a model call: enough slack past REPLAY_ROWS to find a turn the user typed. */
+export const REPLAY_READ_ROWS = REPLAY_ROWS * 2;
 
-export async function loadRows(userId: string, projectId: string): Promise<MessageRow[]> {
+/** How many of the latest rows the chat panel loads. */
+const CHAT_ROWS = 400;
+
+/**
+ * The latest `limit` rows, oldest first. Reads newest first and flips them: PostgREST caps an
+ * unlimited read at 1,000 rows, which on a long chat would be the oldest ones (missing the newest turn).
+ */
+export async function loadRows(userId: string, projectId: string, limit = CHAT_ROWS): Promise<MessageRow[]> {
   const { data, error } = await supabaseAdmin()
     .from("copilot_messages")
     .select("id, role, parts, created_at")
     .eq("user_id", userId)
     .eq("project_id", projectId)
-    .order("created_at")
-    .order("id");
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
   if (error) throw error;
-  return (data ?? []) as MessageRow[];
+  return ((data ?? []) as MessageRow[]).reverse();
 }
 
 export async function appendRow(userId: string, projectId: string, role: "user" | "assistant", parts: StoredParts): Promise<string> {

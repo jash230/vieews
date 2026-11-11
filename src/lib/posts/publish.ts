@@ -220,7 +220,8 @@ export async function publishClaimedTarget(targetId: string, steps: StepRunner):
     appItemUrls: () => items.map((m) => appMediaUrl(m)),
     setStatus: async (status) => {
       await steps.run(`status-${status}`, async () => {
-        await db.from("post_targets").update({ status }).eq("id", targetId);
+        const { error } = await db.from("post_targets").update({ status }).eq("id", targetId);
+        if (error) throw new Error(error.message);
       });
     },
   };
@@ -228,10 +229,13 @@ export async function publishClaimedTarget(targetId: string, steps: StepRunner):
   const result = await adapters[target.platform].publish(ctx);
 
   await steps.run("mark-published", async () => {
-    await db
+    // The post is live: a failed write must throw so the step retries, or the remote id is lost
+    // and the target later times out as failed (inviting a Retry that posts it twice).
+    const { error } = await db
       .from("post_targets")
       .update({ status: "published", remote_id: result.remoteId, remote_url: result.remoteUrl, finished_at: new Date().toISOString(), error: null })
       .eq("id", targetId);
+    if (error) throw new Error(error.message);
     await refreshPostStatus(post.id);
   });
   return result;

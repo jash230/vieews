@@ -266,12 +266,19 @@ export function rollupStatus(statuses: PostTargetRow["status"][]): PostStatus {
 
 export async function refreshPostStatus(postId: string): Promise<PostStatus> {
   const db = supabaseAdmin();
-  const { data } = await db.from("post_targets").select("status").eq("post_id", postId);
+  const { data, error } = await db.from("post_targets").select("status").eq("post_id", postId);
+  // Rolling up an empty answer would read as "canceled".
+  if (error) throw new Error(error.message);
   const status = rollupStatus((data ?? []).map((t) => t.status));
-  await db
+  let update = db
     .from("posts")
     .update({ status, published_at: status === "published" || status === "partial" ? new Date().toISOString() : null })
     .eq("id", postId)
     .neq("status", "canceled");
+  // Pending targets of a post that hasn't gone out yet are just waiting: it stays scheduled
+  // (e.g. after disconnecting one of its accounts) until its publish run picks it up.
+  if (status === "publishing") update = update.neq("status", "scheduled");
+  const { error: updateErr } = await update;
+  if (updateErr) throw new Error(updateErr.message);
   return status;
 }
