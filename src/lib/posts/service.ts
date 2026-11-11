@@ -163,8 +163,12 @@ export async function postProgress(userId: string, postId: string): Promise<stri
     .eq("id", postId)
     .single();
   if (error || !data) throw new Error("Post not found");
-  const targets = (data.targets as { id: string; status: string }[]).toSorted((a, b) => a.id.localeCompare(b.id));
-  return `${data.status}|${targets.map((t) => t.status).join(",")}`;
+  return progressKey(data.status as string, data.targets as { id: string; status: string }[]);
+}
+
+/** Shared by postProgress and the post page, so polling compares like with like. */
+export function progressKey(status: string, targets: { id: string; status: string }[]): string {
+  return `${status}|${targets.toSorted((a, b) => a.id.localeCompare(b.id)).map((t) => t.status).join(",")}`;
 }
 
 export async function listPosts(

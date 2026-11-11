@@ -28,9 +28,13 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
           type="button"
           aria-label={copied ? "Copied" : `Copy ${label}`}
           onClick={async () => {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+              await navigator.clipboard.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch {
+              toast.error("Couldn't copy. Select the text and copy it yourself.");
+            }
           }}
           className="absolute right-1.5 top-1.5 grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
         >

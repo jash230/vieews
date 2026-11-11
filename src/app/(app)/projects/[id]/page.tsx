@@ -1,13 +1,21 @@
 import { auth } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 import { Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
 import { kitGaps } from "@/lib/projects/kit";
 import { getProject, listProjectMedia, ProjectNotFoundError, projectAccountIds } from "@/lib/projects/service";
 import { ProjectSettings } from "./project-settings";
 
-export const metadata = { title: "Project settings" };
+// The title and the page both need the project: read it once per request.
+const loadProject = cache((userId: string, id: string) => getProject(userId, id));
+
+export async function generateMetadata({ params }: PageProps<"/projects/[id]">) {
+  const { userId } = await auth.protect();
+  const { id } = await params;
+  const project = await loadProject(userId, id).catch(() => null);
+  return { title: project ? `${project.name} · Project` : "Project settings" };
+}
 
 export default function ProjectPage({ params, searchParams }: PageProps<"/projects/[id]">) {
   return (
@@ -27,7 +35,7 @@ export default function ProjectPage({ params, searchParams }: PageProps<"/projec
 async function ProjectContent({ params, searchParams }: PageProps<"/projects/[id]">) {
   const { userId } = await auth.protect();
   const [{ id }, sp] = await Promise.all([params, searchParams]);
-  const project = await getProject(userId, id).catch((err) => {
+  const project = await loadProject(userId, id).catch((err) => {
     if (err instanceof ProjectNotFoundError) notFound();
     throw err;
   });

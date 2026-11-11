@@ -43,7 +43,8 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
   const { userId } = await auth.protect();
   const [accounts, usedBy, sp] = await Promise.all([listAccounts(userId), projectsByAccount(userId), searchParams]);
   const connected = typeof sp.connected === "string" ? (sp.connected as Platform) : null;
-  const error = typeof sp.error === "string" ? sp.error : null;
+  // Shown from the URL, so keep it short; it only ever comes from our own OAuth callback redirect.
+  const error = typeof sp.error === "string" ? sp.error.slice(0, 240) : null;
 
   return (
     <>

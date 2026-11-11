@@ -227,10 +227,10 @@ function MediaRow({
       </div>
       {position && (
         <div className="flex shrink-0 flex-col">
-          <button type="button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`Move photo ${position} earlier`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+          <button type="button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`Move photo ${position} earlier`} className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
             <ArrowUp className="size-4" aria-hidden />
           </button>
-          <button type="button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`Move photo ${position} later`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+          <button type="button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`Move photo ${position} later`} className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
             <ArrowDown className="size-4" aria-hidden />
           </button>
         </div>
@@ -319,6 +319,10 @@ export function Composer({
     });
   }
   const platforms = [...new Set(selectedAccounts.map((a) => a.platform))];
+  // Per-platform captions only apply while tabs are shown (2+ platforms); with one platform the box is the caption.
+  const multi = platforms.length > 1;
+  const activeOverrides: Partial<Record<Platform, string>> = multi ? overrides : {};
+  const activeTab: "all" | Platform = multi && captionTab !== "all" && platforms.includes(captionTab) ? captionTab : "all";
   const tiktokAccounts = selectedAccounts.filter((a) => a.platform === "tiktok");
 
   // TikTok requires showing live creator info before posting. Fetch once per account, not once per render.
@@ -449,12 +453,12 @@ export function Composer({
 
   const optionsFor = (platform: Platform): TargetOptions =>
     platform === "youtube"
-      ? { platform, youtube: { ...yt, description: overrides.youtube ?? caption } }
+      ? { platform, youtube: { ...yt, description: activeOverrides.youtube ?? caption } }
       : platform === "instagram"
         ? { platform, instagram: ig }
         : { platform, tiktok: { ...tt, brandOrganic: commercial && tt.brandOrganic, brandedContent: commercial && tt.brandedContent } };
 
-  const captionFor = (platform: Platform) => overrides[platform] ?? caption;
+  const captionFor = (platform: Platform) => activeOverrides[platform] ?? caption;
 
   const issues: ValidationIssue[] = mediaInfos.length
     ? platforms.flatMap((p) => validateMedia(mediaInfos, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
@@ -502,7 +506,7 @@ export function Composer({
       scheduledFor: when === "later" ? new Date(scheduleAt).toISOString() : null,
       targets: selectedAccounts.map((a) => ({
         accountId: a.id,
-        captionOverride: overrides[a.platform] ?? null,
+        captionOverride: activeOverrides[a.platform] ?? null,
         options: optionsFor(a.platform),
       })),
     };
@@ -521,16 +525,16 @@ export function Composer({
 
   const issuesFor = (platform: Platform, field?: ValidationIssue["field"]) =>
     issues.filter((i) => i.platform === platform && (!field || i.field === field));
-  const activeCaption = captionTab === "all" ? caption : overrides[captionTab] ?? caption;
-  const captionMax = captionTab === "all" ? Math.min(...(platforms.length ? platforms.map((p) => CAPTION_MAX[p]) : [2200])) : CAPTION_MAX[captionTab];
+  const activeCaption = activeTab === "all" ? caption : activeOverrides[activeTab] ?? caption;
+  const captionMax = activeTab === "all" ? Math.min(...(platforms.length ? platforms.map((p) => CAPTION_MAX[p]) : [2200])) : CAPTION_MAX[activeTab];
   const vertical = mediaInfo ? isVertical(mediaInfo) : true;
   const shownIndex = Math.min(previewIndex, Math.max(items.length - 1, 0));
   const shown = items[shownIndex] ?? null;
-  const previewCaption = captionFor(captionTab === "all" ? platforms[0] ?? "instagram" : captionTab);
+  const previewCaption = captionFor(activeTab === "all" ? platforms[0] ?? "instagram" : activeTab);
   const captionTabs = ["all", ...platforms] as const;
 
   function onTabKey(e: React.KeyboardEvent) {
-    const at = captionTabs.indexOf(captionTab);
+    const at = captionTabs.indexOf(activeTab);
     const next = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: captionTabs.length - 1 }[e.key];
     if (next === undefined) return;
     e.preventDefault();
@@ -667,16 +671,16 @@ export function Composer({
                   id={`${ids}-tab-${tab}`}
                   role="tab"
                   type="button"
-                  aria-selected={captionTab === tab}
+                  aria-selected={activeTab === tab}
                   aria-controls={`${ids}-caption-panel`}
-                  tabIndex={captionTab === tab ? 0 : -1}
+                  tabIndex={activeTab === tab ? 0 : -1}
                   onClick={() => setCaptionTab(tab)}
                   className={cn(
                     "flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
-                    captionTab === tab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    activeTab === tab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{overrides[tab] !== undefined && <><span className="size-1.5 rounded-full bg-primary" aria-hidden /><span className="sr-only">(customized)</span></>}</>}
+                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{activeOverrides[tab] !== undefined && <><span className="size-1.5 rounded-full bg-primary" aria-hidden /><span className="sr-only">(customized)</span></>}</>}
                 </button>
               ))}
             </div>
@@ -684,14 +688,14 @@ export function Composer({
           <div
             id={`${ids}-caption-panel`}
             role={platforms.length > 1 ? "tabpanel" : undefined}
-            aria-labelledby={platforms.length > 1 ? `${ids}-tab-${captionTab}` : undefined}
+            aria-labelledby={platforms.length > 1 ? `${ids}-tab-${activeTab}` : undefined}
           >
           <Field
             id={`${ids}-caption`}
-            label={captionTab === "all" ? "Caption" : `${PLATFORM_META[captionTab].label} caption`}
+            label={activeTab === "all" ? "Caption" : `${PLATFORM_META[activeTab].label} caption`}
             counter={{ value: activeCaption.length, max: captionMax }}
-            hint={captionTab === "all" ? "Hashtags and @mentions are fine. Instagram allows up to 30 hashtags." : "Only used on this platform."}
-            error={issues.find((i) => i.field === "caption" && (captionTab === "all" || i.platform === captionTab))?.message}
+            hint={activeTab === "all" ? "Hashtags and @mentions are fine. Instagram allows up to 30 hashtags." : "Only used on this platform."}
+            error={issues.find((i) => i.field === "caption" && (activeTab === "all" || i.platform === activeTab))?.message}
           >
             <Textarea
               id={`${ids}-caption`}
@@ -699,10 +703,10 @@ export function Composer({
               value={activeCaption}
               aria-invalid={activeCaption.length > captionMax || undefined}
               placeholder="What's this one about?"
-              onChange={(e) => (captionTab === "all" ? setCaption(e.target.value) : setOverrides((o) => ({ ...o, [captionTab]: e.target.value })))}
+              onChange={(e) => (activeTab === "all" ? setCaption(e.target.value) : setOverrides((o) => ({ ...o, [activeTab]: e.target.value })))}
             />
           </Field>
-          {captionTab !== "all" && overrides[captionTab] !== undefined && (
+          {activeTab !== "all" && activeOverrides[activeTab] !== undefined && (
             <Button
               variant="ghost"
               size="sm"
@@ -710,7 +714,7 @@ export function Composer({
               onClick={() =>
                 setOverrides((o) => {
                   const next = { ...o };
-                  delete next[captionTab];
+                  delete next[activeTab];
                   return next;
                 })
               }
@@ -736,7 +740,7 @@ export function Composer({
                     error={issuesFor("youtube", "title")[0]?.message}
                     hint={vertical && (meta?.durationS ?? 0) <= LIMITS.youtube.shortsMaxDurationS ? "This will appear as a YouTube Short (vertical, 3 min or less)." : undefined}
                   >
-                    <Input id={`${ids}-yt-title`} value={yt.title} maxLength={120} onChange={(e) => setYt({ ...yt, title: e.target.value })} aria-invalid={!!issuesFor("youtube", "title").length || undefined} />
+                    <Input id={`${ids}-yt-title`} value={yt.title} maxLength={LIMITS.youtube.titleMax} onChange={(e) => setYt({ ...yt, title: e.target.value })} aria-invalid={!!issuesFor("youtube", "title").length || undefined} />
                   </Field>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field id={`${ids}-yt-privacy`} label="Visibility">
@@ -890,7 +894,7 @@ export function Composer({
                     aria-label={label}
                     disabled={shownIndex + step < 0 || shownIndex + step >= items.length}
                     onClick={() => setPreviewIndex(shownIndex + step)}
-                    className={cn("absolute top-1/2 z-10 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white transition-opacity hover:bg-black/70 disabled:opacity-0", side)}
+                    className={cn("absolute top-1/2 z-10 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-black/50 after:absolute after:-inset-1 after:content-[''] text-white transition-opacity hover:bg-black/70 disabled:opacity-0", side)}
                   >
                     <Icon className="size-5" aria-hidden />
                   </button>

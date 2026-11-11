@@ -68,10 +68,10 @@ function useSave(success: string) {
   return { pending, error, save };
 }
 
-function SaveRow({ pending, error, label = "Save", dirty = false }: { pending: boolean; error: string | null; label?: string; dirty?: boolean }) {
+function SaveRow({ pending, error, label = "Save", dirty = false, disabled }: { pending: boolean; error: string | null; label?: string; dirty?: boolean; disabled?: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-3 pt-2">
-      <Button type="submit" loading={pending}>{label}</Button>
+      <Button type="submit" loading={pending} disabled={disabled}>{label}</Button>
       {dirty && !error && !pending && <p role="status" className="text-sm font-medium text-warning">Unsaved changes</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
@@ -241,6 +241,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (uploading > 0) return;
     save(() => setProjectMediaAction(projectId, items.map((m) => ({ mediaAssetId: m.id, role: m.role, shows: m.shows, tags: m.tags }))));
   }
 
@@ -318,7 +319,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
               })}
             </ul>
           )}
-          <SaveRow pending={pending} error={error} label="Save images" dirty={dirty} />
+          <SaveRow pending={pending} error={error} label={uploading > 0 ? "Uploading…" : "Save images"} dirty={dirty} disabled={uploading > 0} />
         </form>
       </CardBody>
     </Card>
@@ -392,6 +393,7 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
       <CardBody className="space-y-2">
         <Button
           variant="destructive"
+          className="max-w-full"
           loading={pending}
           onClick={() => {
             if (!confirm(`Delete ${name}? Its copilot chat and settings are removed for good.`)) return;
@@ -403,7 +405,7 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
             });
           }}
         >
-          <Trash2 aria-hidden /> Delete {name}
+          <Trash2 aria-hidden /> <span className="truncate">Delete {name}</span>
         </Button>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </CardBody>

@@ -12,10 +12,11 @@ import { cancelPostAction, postProgressAction, retryTargetAction } from "../../a
  * While publishing, polls a small status check and re-renders the page only when a status actually
  * changes, so the video and the rest of the page stay put in between.
  */
-export function AutoRefresh({ postId, everyMs = 5000 }: { postId: string; everyMs?: number }) {
+export function AutoRefresh({ postId, initial, everyMs = 5000 }: { postId: string; initial: string; everyMs?: number }) {
   const router = useRouter();
   useEffect(() => {
-    let last: string | null = null;
+    // Start from what the server rendered, so a change before the first poll still refreshes.
+    let last = initial;
     let busy = false;
     const id = setInterval(async () => {
       if (busy || document.hidden) return;
@@ -23,11 +24,11 @@ export function AutoRefresh({ postId, everyMs = 5000 }: { postId: string; everyM
       const res = await postProgressAction(postId).catch(() => null);
       busy = false;
       if (!res?.ok) return;
-      if (last !== null && res.data !== last) router.refresh();
+      if (res.data !== last) router.refresh();
       last = res.data;
     }, everyMs);
     return () => clearInterval(id);
-  }, [router, postId, everyMs]);
+  }, [router, postId, initial, everyMs]);
   return null;
 }
 

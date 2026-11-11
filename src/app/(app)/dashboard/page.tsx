@@ -41,23 +41,31 @@ function DashboardSkeleton() {
   );
 }
 
+function daysAgoIso(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60_000).toISOString();
+}
+
 async function DashboardContent() {
   const { userId } = await auth.protect();
   const project = await getCurrentProject(userId);
   if (!project) return <NoProject />;
-  const [accounts, upcoming, recent] = await Promise.all([
+  const monthAgo = daysAgoIso(30);
+  const [accounts, allUpcoming, recent, publishedLately] = await Promise.all([
     listProjectAccounts(userId, project.id),
-    listPosts(userId, { projectId: project.id, status: ["scheduled"], upcoming: true, limit: 5 }),
+    // Fetch more than we show so the "Scheduled" count isn't capped at the list length.
+    listPosts(userId, { projectId: project.id, status: ["scheduled"], upcoming: true, limit: 100 }),
     listPosts(userId, { projectId: project.id, limit: 8 }),
+    listPosts(userId, { projectId: project.id, status: ["published", "partial"], since: monthAgo, limit: 100 }),
   ]);
+  const upcoming = allUpcoming.slice(0, 5);
   const thumbs = await signedReadUrls([...upcoming, ...recent].map((p) => p.media?.thumbnail_path ?? ""));
   const needsReauth = accounts.filter((a) => a.status === "needs_reauth");
-  const published = recent.filter((p) => p.status === "published" || p.status === "partial").length;
+  const published = publishedLately.length;
 
   const stats = [
     { label: "Connected accounts", value: accounts.length, icon: Link2, tile: "bg-brand-tea/60" },
-    { label: "Scheduled", value: upcoming.length, icon: CalendarClock, tile: "bg-brand-olive/45" },
-    { label: "Recently published", value: published, icon: Send, tile: "bg-brand-teal/35" },
+    { label: "Scheduled", value: allUpcoming.length, icon: CalendarClock, tile: "bg-brand-olive/45" },
+    { label: "Published · 30 days", value: published, icon: Send, tile: "bg-brand-teal/35" },
   ];
 
   return (
@@ -66,7 +74,7 @@ async function DashboardContent() {
         <Notice tone="warning" className="mb-6 flex items-center gap-2">
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
           <span>
-            {needsReauth.map((a) => PLATFORM_META[a.platform].label).join(", ")} needs reconnecting.{" "}
+            {needsReauth.map((a) => PLATFORM_META[a.platform].label).join(", ")} {needsReauth.length > 1 ? "need" : "needs"} reconnecting.{" "}
             <Link href="/accounts" className="font-semibold underline underline-offset-2">Go to Accounts</Link>
           </span>
         </Notice>
