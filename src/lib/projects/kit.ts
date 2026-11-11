@@ -4,7 +4,11 @@ import { z } from "zod";
 // (ad-studio/studio/src/kit.ts), except screens, logo and photos live in project_media.
 // Every field has a default so a half-finished draft can be saved and filled in later.
 
-const list = z.array(z.string().trim().min(1)).default([]);
+// Blank entries (an empty line in a form, an empty string from the AI draft) are dropped, not errors.
+const list = z
+  .array(z.string().trim())
+  .transform((items) => items.filter(Boolean))
+  .default([]);
 
 export const projectKitSchema = z.object({
   oneLiner: z.string().trim().max(160).default(""),
