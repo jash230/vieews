@@ -26,6 +26,14 @@ const FILTERS: { key: string; label: string; status?: PostStatus[] }[] = [
   { key: "failed", label: "Failed", status: ["failed", "partial"] },
 ];
 
+// "No in progress posts" reads oddly; each filter says it plainly.
+const EMPTY: Record<string, string> = {
+  scheduled: "Nothing scheduled",
+  publishing: "Nothing publishing right now",
+  published: "Nothing published yet",
+  failed: "No failed posts",
+};
+
 export default function PostsPage({ searchParams }: PageProps<"/posts">) {
   return (
     <>
@@ -90,12 +98,22 @@ async function PostList({ searchParams }: Pick<PageProps<"/posts">, "searchParam
       <FilterNav active={filter.key} />
       <Card>
         {posts.length === 0 ? (
-          <EmptyState
-            icon={<CalendarClock />}
-            title={filter.key === "all" ? "No posts yet" : `No ${filter.label.toLowerCase()} posts`}
-            description="Posts you create here or through the AI show up in this list."
-            action={<ButtonLink href="/compose">Create post</ButtonLink>}
-          />
+          filter.key === "all" ? (
+            <EmptyState
+              icon={<CalendarClock />}
+              title="No posts yet"
+              description="Posts you create here or through the copilot show up in this list."
+              action={<ButtonLink href="/compose">Create post</ButtonLink>}
+            />
+          ) : (
+            // A filter with nothing in it isn't a reason to make a new post: offer the way back.
+            <EmptyState
+              icon={<CalendarClock />}
+              title={EMPTY[filter.key] ?? "Nothing here"}
+              description={`${project.name} has no posts in “${filter.label}”.`}
+              action={<ButtonLink href="/posts" variant="secondary">Show all posts</ButtonLink>}
+            />
+          )
         ) : (
           <ul className="divide-y divide-border">
             {posts.map((p) => <PostRow key={p.id} post={p} thumbUrl={thumbs[p.media?.thumbnail_path ?? ""]} />)}

@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import type { Metadata } from "next";
 import { ArrowRight, Bot, CalendarClock, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -8,6 +9,12 @@ import { PlatformIcon } from "@/components/app/platform";
 import { PlatformOrbit } from "@/components/app/platform-orbit";
 import { ButtonLink } from "@/components/ui/button";
 import { WordRotate } from "@/components/ui/word-rotate";
+
+export const metadata: Metadata = {
+  // The home page names what Vieews does, not just the brand, in search results and tabs.
+  title: { absolute: "Vieews: upload once, post to YouTube, Instagram and TikTok" },
+  alternates: { canonical: "/" },
+};
 
 const FEATURES = [
   { icon: UploadCloud, title: "Upload once", body: "Drop a Reel, Short or TikTok. Vieews checks it against each platform's rules before you post.", tile: "bg-brand-tea/60" },

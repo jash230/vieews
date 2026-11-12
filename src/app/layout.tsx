@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata, Viewport } from "next";
 import { Fredoka, Nunito } from "next/font/google";
 import { Toaster } from "@/components/ui/toast";
+import { env } from "@/lib/env";
 import "./globals.css";
 
 const nunito = Nunito({
@@ -16,9 +17,16 @@ const fredoka = Fredoka({
   display: "swap",
 });
 
+const DESCRIPTION = "Your app's social marketing on autopilot: Vieews makes, schedules and publishes posts to YouTube, Instagram and TikTok while you check in.";
+
+// Link previews (opengraph-image.png next to this file) need absolute URLs, so they resolve against the public app URL.
 export const metadata: Metadata = {
+  metadataBase: new URL(env.appUrl()),
+  applicationName: "Vieews",
   title: { default: "Vieews", template: "%s · Vieews" },
-  description: "Your app's social marketing on autopilot: Vieews makes, schedules and publishes posts to YouTube, Instagram and TikTok while you check in.",
+  description: DESCRIPTION,
+  openGraph: { type: "website", siteName: "Vieews", title: "Vieews: upload once, post everywhere", description: DESCRIPTION },
+  twitter: { card: "summary_large_image", title: "Vieews: upload once, post everywhere", description: DESCRIPTION },
 };
 
 export const viewport: Viewport = {

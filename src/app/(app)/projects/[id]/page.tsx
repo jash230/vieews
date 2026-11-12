@@ -5,6 +5,7 @@ import { Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
 import { kitGaps } from "@/lib/projects/kit";
 import { getProject, listProjectMedia, ProjectNotFoundError, projectAccountIds } from "@/lib/projects/service";
+import { ClearNoticeParams } from "../../accounts/clear-notice-params";
 import { ProjectSettings } from "./project-settings";
 
 // The title and the page both need the project: read it once per request.
@@ -46,6 +47,7 @@ async function ProjectContent({ params, searchParams }: PageProps<"/projects/[id
   return (
     <>
       <PageHeader title={project.name} description="What the copilot knows about this app, and where it posts." />
+      {(warning || sp.review) && <ClearNoticeParams params={["warning", "review"]} />}
       {warning && <Notice tone="warning" className="mb-6">{warning}</Notice>}
       {sp.review && !warning && (
         <Notice tone="success" className="mb-6">Drafted from your listing. Read it through and fix anything that isn&apos;t true; ads only say what&apos;s here.</Notice>

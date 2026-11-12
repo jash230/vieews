@@ -157,6 +157,14 @@ function MediaRow({
 }) {
   const { file, meta, state, previewUrl } = item;
   const isImage = file.type.startsWith("image/");
+  // Read out when the upload's state changes, not on every percent of progress.
+  const announcement = state.status === "error" ? `${file.name} didn't upload: ${state.error}` : {
+    idle: "",
+    uploading: `Uploading ${file.name}`,
+    done: `${file.name} uploaded`,
+    "too-big": `${file.name} is too big`,
+    shrinking: `Shrinking ${file.name}`,
+  }[state.status];
   return (
     <li className="flex items-center gap-4 rounded-2xl border border-border bg-surface p-3 sm:p-4">
       <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-background text-muted-foreground shadow-sm">
@@ -181,7 +189,8 @@ function MediaRow({
           {meta.durationS ? ` · ${formatDuration(meta.durationS)}` : ""}
           {landscape && " · landscape"}
         </p>
-        <div className="mt-2" aria-live="polite">
+        <p className="sr-only" role="status">{announcement}</p>
+        <div className="mt-2">
           {state.status === "uploading" && (
             <div className="flex items-center gap-3">
               <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(state.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Upload progress for ${file.name}`}>
@@ -369,6 +378,17 @@ export function Composer({
     return () => observer.disconnect();
   }, []);
 
+  // A file dropped beside the drop zone would make the browser open it and leave the page.
+  useEffect(() => {
+    const block = (e: DragEvent) => e.dataTransfer?.types.includes("Files") && e.preventDefault();
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, []);
+
   // Warn before leaving (or switching project) with unsaved work.
   useUnsavedGuard(items.length > 0 && !submitted, "Leave this page? Your upload and caption haven't been posted and will be lost.");
 
@@ -459,7 +479,8 @@ export function Composer({
     if (info && "error" in info) blockers.push({ message: `TikTok: ${info.error}`, target: SECTION.settings });
   }
 
-  const canSubmit = uploaded && blockers.length === 0 && !submitting;
+  // `submitted` keeps it off while the post page loads, so a second click can't post twice.
+  const canSubmit = uploaded && blockers.length === 0 && !submitting && !submitted;
   // Why Publish is off before there's anything to check.
   const waitReason = !items.length
     ? "Add a video or photos to get started."
@@ -546,7 +567,8 @@ export function Composer({
                 e.preventDefault();
                 setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              // Moving over the text inside fires dragleave too; only reset when leaving the zone itself.
+              onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDragging(false)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);
@@ -567,7 +589,15 @@ export function Composer({
               </Button>
             </div>
           ) : (
-            <div className="space-y-2">
+            // Dropping more photos onto the list adds them; anything that doesn't fit gets the same message as the picker.
+            <div
+              className="space-y-2"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                pickFiles(e.dataTransfer.files);
+              }}
+            >
               <ol className="space-y-2" aria-label={isCarousel ? "Carousel photos in order" : "Media"}>
                 {items.map((item, index) => (
                   <MediaRow
@@ -939,7 +969,7 @@ export function Composer({
             )}
             {submitError && <Notice tone="error" className="whitespace-pre-line">{submitError}</Notice>}
 
-            <Button className="w-full" disabled={!canSubmit} loading={submitting} onClick={submit}>
+            <Button className="w-full" disabled={!canSubmit} loading={submitting || submitted} onClick={submit}>
               {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
               {when === "now" ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}` : "Schedule post"}
             </Button>
@@ -967,7 +997,7 @@ export function Composer({
             <span className="font-semibold text-success">Ready to {when === "now" ? "publish" : "schedule"}</span>
           )}
         </p>
-        <Button size="sm" disabled={!canSubmit} loading={submitting} onClick={submit} tabIndex={publishVisible ? -1 : undefined}>
+        <Button size="sm" disabled={!canSubmit} loading={submitting || submitted} onClick={submit} tabIndex={publishVisible ? -1 : undefined}>
           {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
           {when === "now" ? "Publish" : "Schedule"}
         </Button>

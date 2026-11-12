@@ -66,7 +66,10 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-display text-[28px] font-semibold tracking-tight">Post details</h1>
-          <StatusBadge status={post.status} />
+          {/* A live region, so screen readers hear "Published" or "Failed" when the polling refresh lands. */}
+          <span role="status">
+            <StatusBadge status={post.status} />
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {post.status === "scheduled" && <CancelPostButton postId={post.id} />}

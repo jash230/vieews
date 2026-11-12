@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUp, ImagePlus, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, useTransition } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
@@ -333,7 +334,11 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
 }
 
 function AccountsPicker({ projectId, accounts, linked }: { projectId: string; accounts: PublicAccount[]; linked: string[] }) {
-  const [selected, setSelected] = useSynced([...linked].sort());
+  const saved = [...linked].sort();
+  const [selected, setSelected] = useSynced(saved);
+  // Ticking a box does nothing until Save, so say so, and ask before leaving like the other sections.
+  const dirty = !same(selected, saved);
+  useUnsavedGuard(dirty, "Leave without saving? Your changes to where this project posts will be lost.");
   const { pending, error, save } = useSave("Accounts updated");
   const toggle = (accountId: string) =>
     setSelected((prev) => (prev.includes(accountId) ? prev.filter((x) => x !== accountId) : [...prev, accountId].sort()));
@@ -356,7 +361,7 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
         >
           {accounts.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No accounts connected yet. <a href="/accounts" className="font-semibold text-primary underline underline-offset-2">Connect one</a>.
+              No accounts connected yet. <Link href="/accounts" className="font-semibold text-primary underline underline-offset-2">Connect one</Link>.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -376,8 +381,8 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
               ))}
             </ul>
           )}
-          <a href="/accounts" className="inline-block text-sm font-semibold text-primary hover:underline">Connect another account</a>
-          <SaveRow pending={pending} error={error} />
+          <Link href="/accounts" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline">Connect another account</Link>
+          <SaveRow pending={pending} error={error} dirty={dirty} />
         </form>
       </CardBody>
     </Card>

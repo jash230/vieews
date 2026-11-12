@@ -17,7 +17,7 @@ interface KeyView {
   lastUsed: string | null;
 }
 
-function CopyBlock({ label, text }: { label: string; text: string }) {
+function CopyBlock({ label, text, autoFocus }: { label: string; text: string; autoFocus?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div>
@@ -26,6 +26,7 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
         <pre className="whitespace-pre-wrap rounded-xl border border-border bg-surface p-3.5 pr-14 text-[13px] leading-relaxed [overflow-wrap:anywhere]"><code>{text}</code></pre>
         <button
           type="button"
+          autoFocus={autoFocus}
           aria-label={copied ? "Copied" : `Copy ${label}`}
           onClick={async () => {
             try {
@@ -86,7 +87,8 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
               Copy this key now. You won&apos;t be able to see it again.
             </Notice>
           )}
-          {newKey && <CopyBlock label="Your new key" text={newKey} />}
+          {/* Focus lands on its Copy button, so the one-time key is on screen and one keypress from copied. */}
+          {newKey && <CopyBlock key={newKey} label="Your new key" text={newKey} autoFocus />}
         </CardBody>
       </Card>
 

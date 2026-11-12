@@ -38,6 +38,7 @@ export function ProjectSwitcher({
   const [pending, start] = useTransition();
   const [switching, setSwitching] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const current = projects.find((p) => p.id === currentId) ?? null;
   const shown = query ? projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())) : projects;
@@ -45,12 +46,19 @@ export function ProjectSwitcher({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Escape hands focus back to the button, so keyboard users aren't dropped at the top of the page.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
+      // Each opening starts from the full list.
+      setQuery("");
     };
   }, [open]);
 
@@ -72,8 +80,15 @@ export function ProjectSwitcher({
 
   const chip = variant === "chip";
   return (
-    <div ref={root} className={cn("relative min-w-0", className)}>
+    <div
+      ref={root}
+      className={cn("relative min-w-0", className)}
+      // Tabbing out closes it instead of leaving it open over the page. (No relatedTarget means a click,
+      // which Safari doesn't focus; the outside-pointer handler covers those.)
+      onBlur={(e) => open && e.relatedTarget && !root.current?.contains(e.relatedTarget) && setOpen(false)}
+    >
       <button
+        ref={trigger}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"

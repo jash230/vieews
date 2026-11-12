@@ -1,16 +1,16 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Suspense } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
 import { projectsByAccount } from "@/lib/projects/service";
 import { isPlatformConfigured, PLATFORM_ENV } from "@/lib/env";
-import { cn } from "@/lib/utils";
 import { PLATFORMS, type Platform } from "@/lib/types";
 import { auth } from "@clerk/nextjs/server";
 import { ClearNoticeParams } from "./clear-notice-params";
+import { ConnectLink } from "./connect-link";
 import { DisconnectButton } from "./disconnect-button";
 
 export const metadata = { title: "Accounts" };
@@ -113,10 +113,12 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
                 )}
                 <div className="mt-auto pt-2">
                   {isPlatformConfigured(platform) ? (
-                    // A plain <a>, not <Link>: the route redirects to the platform's sign-in page, which needs a full page load.
-                    <a href={`/api/connect/${platform}`} className={cn(buttonVariants({ variant: list.length ? "secondary" : "primary" }), "w-full")}>
-                      {list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another` : `Connect ${meta.label}`}
-                    </a>
+                    <ConnectLink
+                      href={`/api/connect/${platform}`}
+                      platformLabel={meta.label}
+                      primary={!list.length}
+                      label={list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another ${meta.label} account` : `Connect ${meta.label}`}
+                    />
                   ) : (
                     <>
                       <Button variant="secondary" disabled className="w-full">{process.env.NODE_ENV === "production" ? "Coming soon" : "Not set up"}</Button>

@@ -6,6 +6,7 @@ import { Logo } from "@/components/app/logo";
 export const metadata: Metadata = {
   title: "Terms of Service",
   description: "The rules for using Vieews to post to YouTube, Instagram and TikTok.",
+  alternates: { canonical: "/terms" },
 };
 
 const UPDATED = "October 30, 2026";
@@ -56,7 +57,7 @@ export default function TermsPage() {
       <div className="pointer-events-none absolute -right-24 top-24 size-80 rounded-full bg-brand-olive/20 blur-3xl" aria-hidden />
 
       <header className="relative mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Logo />
+        <Logo href="/" />
         <nav aria-label="Legal" className="flex gap-1 text-sm font-semibold">
           <Link href="/privacy" className="flex min-h-11 items-center rounded-xl px-3 text-muted-foreground transition-colors hover:bg-primary-soft hover:text-foreground">
             Privacy
