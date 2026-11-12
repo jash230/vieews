@@ -101,13 +101,19 @@ export async function defaultProject(userId: string): Promise<ProjectRow | null>
 export async function ensureFirstProject(userId: string): Promise<ProjectRow> {
   const existing = await defaultProject(userId);
   if (existing) return existing;
-  const { error } = await supabaseAdmin()
+  const db = supabaseAdmin();
+  const { data: inserted, error } = await db
     .from("projects")
-    .upsert({ user_id: userId, name: "My app", slug: "my-app", kit: projectKitSchema.parse({}) }, { onConflict: "user_id,slug", ignoreDuplicates: true });
+    .upsert({ user_id: userId, name: "My app", slug: "my-app", kit: projectKitSchema.parse({}) }, { onConflict: "user_id,slug", ignoreDuplicates: true })
+    .select("*");
   if (error) throw error;
-  const created = await defaultProject(userId);
-  if (!created) throw new Error("Couldn't create your first project");
-  return created;
+  if (inserted?.length) return parseRow(inserted[0] as ProjectRow);
+  // A concurrent render made it first. Look it up by slug: repeating defaultProject's exact query
+  // would get the memoized empty answer from earlier in this render.
+  const { data, error: readErr } = await db.from("projects").select("*").eq("user_id", userId).eq("slug", "my-app").maybeSingle();
+  if (readErr) throw readErr;
+  if (!data) throw new Error("Couldn't create your first project");
+  return parseRow(data as ProjectRow);
 }
 
 export async function createProject(userId: string, input: ProjectInput): Promise<ProjectRow> {

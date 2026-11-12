@@ -36,6 +36,7 @@ function describeMedia(m: MediaAssetRow): string {
 function friendlyError(err: unknown): string {
   if (err instanceof Anthropic.RateLimitError) return "The copilot is busy right now. Try again in a minute.";
   if (err instanceof Anthropic.AuthenticationError) return "The copilot isn't set up correctly (API key).";
+  if (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message)) return "The copilot is out of AI credits right now. Try again later.";
   if (err instanceof Anthropic.APIError) return "The copilot hit a problem talking to the AI. Try again.";
   return err instanceof Error ? err.message : "Something went wrong";
 }
