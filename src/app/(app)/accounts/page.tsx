@@ -1,15 +1,16 @@
 import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Suspense } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Notice, PageHeader, Skeleton } from "@/components/ui/misc";
 import { listAccounts } from "@/lib/accounts/service";
 import { projectsByAccount } from "@/lib/projects/service";
 import { isPlatformConfigured, PLATFORM_ENV } from "@/lib/env";
-import { cn } from "@/lib/utils";
 import { PLATFORMS, type Platform } from "@/lib/types";
 import { auth } from "@clerk/nextjs/server";
+import { ClearNoticeParams } from "./clear-notice-params";
+import { ConnectLink } from "./connect-link";
 import { DisconnectButton } from "./disconnect-button";
 
 export const metadata = { title: "Accounts" };
@@ -43,14 +44,20 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
   const { userId } = await auth.protect();
   const [accounts, usedBy, sp] = await Promise.all([listAccounts(userId), projectsByAccount(userId), searchParams]);
   const connected = typeof sp.connected === "string" ? (sp.connected as Platform) : null;
-  const error = typeof sp.error === "string" ? sp.error : null;
+  // Shown from the URL, so keep it short; it only ever comes from our own OAuth callback redirect.
+  const error = typeof sp.error === "string" ? sp.error.slice(0, 240) : null;
 
   return (
     <>
+      {(connected || error) && <ClearNoticeParams />}
       {connected && PLATFORM_META[connected] && (
         <Notice tone="success" className="mb-6">{PLATFORM_META[connected].label} connected.</Notice>
       )}
-      {error && <Notice tone="error" className="mb-6">{error}</Notice>}
+      {error && (
+        <Notice tone="error" className="mb-6">
+          <span className="font-semibold">Couldn&apos;t connect the account.</span> {error}
+        </Notice>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {PLATFORMS.map((platform, i) => {
@@ -106,17 +113,24 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
                 )}
                 <div className="mt-auto pt-2">
                   {isPlatformConfigured(platform) ? (
-                    // A plain <a>, not <Link>: the route redirects to the platform's sign-in page, which needs a full page load.
-                    <a href={`/api/connect/${platform}`} className={cn(buttonVariants({ variant: list.length ? "secondary" : "primary" }), "w-full")}>
-                      {list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another` : `Connect ${meta.label}`}
-                    </a>
+                    <ConnectLink
+                      href={`/api/connect/${platform}`}
+                      platformLabel={meta.label}
+                      primary={!list.length}
+                      label={list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another ${meta.label} account` : `Connect ${meta.label}`}
+                    />
                   ) : (
                     <>
-                      <Button variant="secondary" disabled className="w-full">Not set up</Button>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                        Add {PLATFORM_ENV[platform].vars.map((v) => <code key={v} className="font-mono">{v} </code>)}
-                        to <code className="font-mono">.env.local</code> and restart. See SETUP.md step {PLATFORM_ENV[platform].setupStep}.
-                      </p>
+                      <Button variant="secondary" disabled className="w-full">{process.env.NODE_ENV === "production" ? "Coming soon" : "Not set up"}</Button>
+                      {process.env.NODE_ENV === "production" ? (
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{meta.label} isn&apos;t available yet.</p>
+                      ) : (
+                        // Setup steps are for whoever runs Vieews, not for people using it.
+                        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                          Add {PLATFORM_ENV[platform].vars.map((v) => <code key={v} className="font-mono">{v} </code>)}
+                          to <code className="font-mono">.env.local</code> and restart. See SETUP.md step {PLATFORM_ENV[platform].setupStep}.
+                        </p>
+                      )}
                     </>
                   )}
                 </div>

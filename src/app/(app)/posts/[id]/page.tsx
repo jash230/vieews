@@ -1,18 +1,28 @@
 import { auth } from "@clerk/nextjs/server";
-import { format } from "date-fns";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
+import { cache } from "react";
 import { redirect } from "next/navigation";
+import { LocalTime } from "@/components/app/local-time";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
 import { StatusBadge } from "@/components/app/status";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { signedReadUrls } from "@/lib/media/service";
 import { canDeletePost } from "@/lib/posts/deletable";
 import { healStalledPost } from "@/lib/posts/publish";
-import { getPost, type PostWithTargets } from "@/lib/posts/service";
-import { AutoRefresh, CancelPostButton, DeletePostButton, PostVideo, RetryButton } from "./post-actions";
+import { getPost, progressKey, type PostWithTargets } from "@/lib/posts/service";
+import { AutoRefresh, CancelPostButton, RefreshWhenDue, DeletePostButton, PostVideo, RetryButton } from "./post-actions";
 
-export const metadata = { title: "Post" };
+// The title and the page both need the post: read it once per request.
+const loadPost = cache((userId: string, id: string) => getPost(userId, id));
+
+export async function generateMetadata({ params }: PageProps<"/posts/[id]">) {
+  const { userId } = await auth.protect();
+  const { id } = await params;
+  const post = await loadPost(userId, id).catch(() => null);
+  const caption = post?.caption?.trim().split("\n")[0] ?? "";
+  return { title: caption ? `${caption.length > 50 ? `${caption.slice(0, 50)}…` : caption} · Post` : "Post" };
+}
 
 function optionSummary(t: PostWithTargets["targets"][number], photos: number): string {
   const o = t.options;
@@ -26,29 +36,40 @@ function optionSummary(t: PostWithTargets["targets"][number], photos: number): s
   return photos ? `${photos > 1 ? `${photos} photos` : "Photo"} · ${visibility}` : visibility;
 }
 
+/** Whether a time has passed, at request time (a server component renders once per request). */
+function isPast(iso: string | null): boolean {
+  return !!iso && new Date(iso).getTime() <= Date.now();
+}
+
 export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
   const { userId } = await auth.protect();
   const { id } = await params;
-  const post = await getPost(userId, id).catch(() => null);
+  const post = await loadPost(userId, id).catch(() => null);
   // Deleted (or never ours): back to the list rather than a 404, since deleting re-renders this page.
   if (!post) redirect("/posts");
   const live = post.items.filter((m) => !m.purged_at);
   const urls = await signedReadUrls(live.map((m) => m.storage_path)).catch(() => ({}) as Record<string, string>);
   const mediaUrl = post.media && !post.media.purged_at ? urls[post.media.storage_path] ?? null : null;
   const photos = post.items.every((m) => m.kind === "image") ? post.items.length : 0;
-  const inFlight = post.status === "publishing";
+  // A scheduled post past its time is about to start: watch it like one that's publishing.
+  const due = post.status === "scheduled" && isPast(post.scheduled_for);
+  const inFlight = post.status === "publishing" || due;
   healStalledPost(post);
 
   return (
     <>
-      {inFlight && <AutoRefresh postId={post.id} />}
+      {inFlight && <AutoRefresh postId={post.id} initial={progressKey(post.status, post.targets)} />}
+      {post.status === "scheduled" && !due && post.scheduled_for && <RefreshWhenDue at={post.scheduled_for} />}
       <Link href="/posts" className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden /> All posts
       </Link>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-display text-[28px] font-semibold tracking-tight">Post details</h1>
-          <StatusBadge status={post.status} />
+          {/* A live region, so screen readers hear "Published" or "Failed" when the polling refresh lands. */}
+          <span role="status">
+            <StatusBadge status={post.status} />
+          </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {post.status === "scheduled" && <CancelPostButton postId={post.id} />}
@@ -86,7 +107,13 @@ export default async function PostPage({ params }: PageProps<"/posts/[id]">) {
           <CardBody className="space-y-2 text-sm">
             <p className="whitespace-pre-wrap break-words">{post.caption || <span className="text-muted-foreground">No caption</span>}</p>
             <p className="text-xs text-muted-foreground">
-              {post.scheduled_for ? `Scheduled for ${format(new Date(post.scheduled_for), "PPP p")}` : `Created ${format(new Date(post.created_at), "PPP p")}`}
+              {post.scheduled_for && post.status === "scheduled" ? (
+                <>Scheduled for <LocalTime iso={post.scheduled_for} fmt="PPP p" /></>
+              ) : post.published_at ? (
+                <>Published <LocalTime iso={post.published_at} fmt="PPP p" /></>
+              ) : (
+                <>Created <LocalTime iso={post.created_at} fmt="PPP p" /></>
+              )}
               {post.source === "mcp" && " · via AI"}
               {post.campaign && <> · <span className="font-medium text-foreground">{post.campaign}</span></>}
             </p>

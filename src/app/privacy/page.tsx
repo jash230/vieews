@@ -8,6 +8,7 @@ import type { Platform } from "@/lib/types";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description: "What Vieews stores when you post to YouTube, Instagram and TikTok, why, and how to delete it.",
+  alternates: { canonical: "/privacy" },
 };
 
 const UPDATED = "October 30, 2026";
@@ -82,7 +83,7 @@ export default function PrivacyPage() {
       <div className="pointer-events-none absolute -right-24 top-24 size-80 rounded-full bg-brand-teal/20 blur-3xl" aria-hidden />
 
       <header className="relative mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-        <Logo />
+        <Logo href="/" />
         <nav aria-label="Legal" className="flex gap-1 text-sm font-semibold">
           <Link href="/privacy" aria-current="page" className="flex min-h-11 items-center rounded-xl bg-primary-soft px-3 text-foreground">
             Privacy

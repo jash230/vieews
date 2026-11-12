@@ -19,13 +19,20 @@ export async function GET(req: NextRequest, { params }: RouteContext<"/api/conne
 
   const url = req.nextUrl;
   const cookie = req.cookies.get(oauthCookie(platform))?.value;
-  const saved = cookie ? (JSON.parse(cookie) as { state: string; codeVerifier: string; userId: string }) : null;
+  let saved: { state: string; codeVerifier: string; userId: string } | null = null;
+  try {
+    saved = cookie ? JSON.parse(cookie) : null;
+  } catch {
+    // A mangled or old cookie is just an expired sign-in.
+  }
 
   const providerError = url.searchParams.get("error_description") ?? url.searchParams.get("error");
   const code = url.searchParams.get("code");
   let res: NextResponse;
   if (providerError) {
-    res = back({ error: `${adapter.label}: ${providerError}` });
+    // Pressing Cancel on the platform's consent screen isn't an error worth a provider code.
+    const canceled = /access_denied|user_denied|cancel/i.test(url.searchParams.get("error") ?? providerError);
+    res = back({ error: canceled ? `You canceled connecting ${adapter.label}.` : `${adapter.label} said: ${providerError}` });
   } else if (!saved || saved.state !== url.searchParams.get("state") || saved.userId !== userId || !code) {
     res = back({ error: `${adapter.label} sign-in expired or didn't match. Try connecting again.` });
   } else {

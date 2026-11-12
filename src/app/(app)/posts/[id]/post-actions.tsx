@@ -8,14 +8,28 @@ import { deletePostNow } from "@/components/app/deleted-posts";
 import { toast } from "@/components/ui/toast";
 import { cancelPostAction, postProgressAction, retryTargetAction } from "../../actions";
 
+/** Re-renders the page when a scheduled post is due, so it doesn't sit on "Scheduled" after going out. */
+export function RefreshWhenDue({ at }: { at: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    const wait = new Date(at).getTime() - Date.now() + 3000;
+    // Only for posts due within a day: a further-off tab will be reloaded long before then.
+    if (wait > 24 * 60 * 60 * 1000) return;
+    const id = setTimeout(() => router.refresh(), Math.max(wait, 0));
+    return () => clearTimeout(id);
+  }, [router, at]);
+  return null;
+}
+
 /**
  * While publishing, polls a small status check and re-renders the page only when a status actually
  * changes, so the video and the rest of the page stay put in between.
  */
-export function AutoRefresh({ postId, everyMs = 5000 }: { postId: string; everyMs?: number }) {
+export function AutoRefresh({ postId, initial, everyMs = 5000 }: { postId: string; initial: string; everyMs?: number }) {
   const router = useRouter();
   useEffect(() => {
-    let last: string | null = null;
+    // Start from what the server rendered, so a change before the first poll still refreshes.
+    let last = initial;
     let busy = false;
     const id = setInterval(async () => {
       if (busy || document.hidden) return;
@@ -23,11 +37,11 @@ export function AutoRefresh({ postId, everyMs = 5000 }: { postId: string; everyM
       const res = await postProgressAction(postId).catch(() => null);
       busy = false;
       if (!res?.ok) return;
-      if (last !== null && res.data !== last) router.refresh();
+      if (res.data !== last) router.refresh();
       last = res.data;
     }, everyMs);
     return () => clearInterval(id);
-  }, [router, postId, everyMs]);
+  }, [router, postId, initial, everyMs]);
   return null;
 }
 
@@ -57,7 +71,7 @@ export function CancelPostButton({ postId }: { postId: string }) {
       variant="destructive"
       loading={pending}
       onClick={() => {
-        if (!confirm("Cancel this scheduled post? It won't be published anywhere.")) return;
+        if (!confirm("Stop this post from going out? It won't be published anywhere.\n\nOK stops it. Cancel keeps it scheduled.")) return;
         start(async () => {
           const res = await cancelPostAction(postId);
           if (res.ok) toast.success("Post canceled", { description: "It won't be published anywhere." });

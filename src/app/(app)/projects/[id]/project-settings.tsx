@@ -1,9 +1,11 @@
 "use client";
 
 import { ArrowUp, ImagePlus, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, useTransition } from "react";
 import { PlatformBadge, PLATFORM_META } from "@/components/app/platform";
+import { useUnsavedGuard } from "@/components/app/unsaved-guard";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/form";
@@ -68,10 +70,11 @@ function useSave(success: string) {
   return { pending, error, save };
 }
 
-function SaveRow({ pending, error, label = "Save" }: { pending: boolean; error: string | null; label?: string }) {
+function SaveRow({ pending, error, label = "Save", dirty = false, disabled }: { pending: boolean; error: string | null; label?: string; dirty?: boolean; disabled?: boolean }) {
   return (
-    <div className="flex items-center gap-3 pt-2">
-      <Button type="submit" loading={pending}>{label}</Button>
+    <div className="flex flex-wrap items-center gap-3 pt-2">
+      <Button type="submit" loading={pending} disabled={disabled}>{label}</Button>
+      {dirty && !error && !pending && <p role="status" className="text-sm font-medium text-warning">Unsaved changes</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </div>
   );
@@ -95,7 +98,7 @@ export function ProjectSettings({ project, media, accounts, linked }: Props) {
 function KitForm({ project }: { project: Props["project"] }) {
   const id = useId();
   const k = project.kit;
-  const [f, setF] = useSynced({
+  const server = {
     name: project.name,
     storeUrl: project.storeUrl ?? "",
     oneLiner: k.oneLiner,
@@ -110,7 +113,10 @@ function KitForm({ project }: { project: Props["project"] }) {
     personas: k.personas.join("\n"),
     hashtags: k.hashtags.join(", "),
     notes: project.notes,
-  });
+  };
+  const [f, setF] = useSynced(server);
+  const dirty = !same(f, server);
+  useUnsavedGuard(dirty, "Leave without saving? Your changes to the project details will be lost.");
   const set = (key: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [key]: e.target.value });
   const { pending, error, save } = useSave("Project details saved");
 
@@ -190,7 +196,7 @@ function KitForm({ project }: { project: Props["project"] }) {
             <Textarea id={`${id}-notes`} value={f.notes} onChange={set("notes")} className="min-h-20" />
           </Field>
           <div className="sm:col-span-2">
-            <SaveRow pending={pending} error={error} />
+            <SaveRow pending={pending} error={error} dirty={dirty} />
           </div>
         </form>
       </CardBody>
@@ -206,6 +212,10 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const { pending, error, save } = useSave("Images saved");
+  // Added, removed, reordered or relabeled images only stick once saved, so say when there's something to save.
+  const strip = (list: MediaItem[]) => JSON.stringify(list.map(({ id, role, shows, tags }) => ({ id, role, shows, tags })));
+  const dirty = strip(items) !== strip(initial);
+  useUnsavedGuard(dirty || uploading > 0, "Leave without saving? Your changes to the project images will be lost.");
 
   const update = (mediaId: string, patch: Partial<MediaItem>) => setItems((prev) => prev.map((m) => (m.id === mediaId ? { ...m, ...patch } : m)));
   const moveUp = (index: number) =>
@@ -237,6 +247,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (uploading > 0) return;
     save(() => setProjectMediaAction(projectId, items.map((m) => ({ mediaAssetId: m.id, role: m.role, shows: m.shows, tags: m.tags }))));
   }
 
@@ -272,10 +283,10 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center gap-1">
                         <select
-                          aria-label="Kind"
+                          aria-label={`Kind of image ${i + 1}`}
                           value={m.role}
                           onChange={(e) => update(m.id, { role: e.target.value as ProjectMediaRole })}
-                          className="min-h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold"
+                          className="min-h-11 rounded-lg border border-border bg-background px-2 text-xs font-semibold"
                         >
                           <option value="screen">Screen</option>
                           <option value="logo">Logo</option>
@@ -284,23 +295,24 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
                         <button
                           type="button"
                           aria-pressed={magic}
+                          aria-label={`Magic moment: image ${i + 1}`}
                           onClick={() => update(m.id, { tags: magic ? m.tags.filter((t) => t !== "magic") : [...m.tags, "magic"] })}
                           className={cn(
-                            "min-h-9 rounded-lg border px-2 text-xs font-bold",
+                            "min-h-11 rounded-lg border px-2 text-xs font-bold",
                             magic ? "border-primary bg-primary text-on-primary" : "border-border bg-background text-muted-foreground",
                           )}
                         >
                           Magic
                         </button>
                         <span className="flex-1" />
-                        <button type="button" aria-label="Move earlier" disabled={i === 0} onClick={() => moveUp(i)} className="grid size-9 place-items-center rounded-lg text-subtle-foreground hover:bg-primary-soft disabled:opacity-30">
+                        <button type="button" aria-label={`Move image ${i + 1} earlier`} disabled={i === 0} onClick={() => moveUp(i)} className="grid size-11 place-items-center rounded-lg text-subtle-foreground hover:bg-primary-soft disabled:opacity-30">
                           <ArrowUp className="size-4" aria-hidden />
                         </button>
-                        <button type="button" aria-label="Remove" onClick={() => setItems((prev) => prev.filter((x) => x.id !== m.id))} className="grid size-9 place-items-center rounded-lg text-subtle-foreground hover:bg-destructive-soft hover:text-destructive">
+                        <button type="button" aria-label={`Remove image ${i + 1}`} onClick={() => setItems((prev) => prev.filter((x) => x.id !== m.id))} className="grid size-11 place-items-center rounded-lg text-subtle-foreground hover:bg-destructive-soft hover:text-destructive">
                           <X className="size-4" aria-hidden />
                         </button>
                       </div>
-                      <label className="sr-only" htmlFor={`${id}-${m.id}`}>What it shows</label>
+                      <label className="sr-only" htmlFor={`${id}-${m.id}`}>What image {i + 1} shows</label>
                       <Textarea
                         id={`${id}-${m.id}`}
                         value={m.shows}
@@ -314,7 +326,7 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
               })}
             </ul>
           )}
-          <SaveRow pending={pending} error={error} label="Save images" />
+          <SaveRow pending={pending} error={error} label={uploading > 0 ? "Uploading…" : "Save images"} dirty={dirty} disabled={uploading > 0} />
         </form>
       </CardBody>
     </Card>
@@ -322,7 +334,11 @@ function ScreensEditor({ projectId, initial }: { projectId: string; initial: Med
 }
 
 function AccountsPicker({ projectId, accounts, linked }: { projectId: string; accounts: PublicAccount[]; linked: string[] }) {
-  const [selected, setSelected] = useSynced([...linked].sort());
+  const saved = [...linked].sort();
+  const [selected, setSelected] = useSynced(saved);
+  // Ticking a box does nothing until Save, so say so, and ask before leaving like the other sections.
+  const dirty = !same(selected, saved);
+  useUnsavedGuard(dirty, "Leave without saving? Your changes to where this project posts will be lost.");
   const { pending, error, save } = useSave("Accounts updated");
   const toggle = (accountId: string) =>
     setSelected((prev) => (prev.includes(accountId) ? prev.filter((x) => x !== accountId) : [...prev, accountId].sort()));
@@ -345,7 +361,7 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
         >
           {accounts.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No accounts connected yet. <a href="/accounts" className="font-semibold text-primary underline underline-offset-2">Connect one</a>.
+              No accounts connected yet. <Link href="/accounts" className="font-semibold text-primary underline underline-offset-2">Connect one</Link>.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -365,8 +381,8 @@ function AccountsPicker({ projectId, accounts, linked }: { projectId: string; ac
               ))}
             </ul>
           )}
-          <a href="/accounts" className="inline-block text-sm font-semibold text-primary hover:underline">Connect another account</a>
-          <SaveRow pending={pending} error={error} />
+          <Link href="/accounts" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline">Connect another account</Link>
+          <SaveRow pending={pending} error={error} dirty={dirty} />
         </form>
       </CardBody>
     </Card>
@@ -388,18 +404,20 @@ function DangerZone({ projectId, name }: { projectId: string; name: string }) {
       <CardBody className="space-y-2">
         <Button
           variant="destructive"
+          className="max-w-full"
           loading={pending}
           onClick={() => {
             if (!confirm(`Delete ${name}? Its copilot chat and settings are removed for good.`)) return;
             start(async () => {
-              const res = await deleteProjectAction(projectId);
+              const res = await deleteProjectAction(projectId).catch(() => ({ ok: false as const, error: "Couldn't reach Vieews. Check your connection and try again." }));
               if (!res.ok) return setError(res.error);
               toast.success(`Deleted ${name}`);
-              router.push("/projects");
+              // replace, not push: Back would land on the deleted project's 404.
+              router.replace("/projects");
             });
           }}
         >
-          <Trash2 aria-hidden /> Delete {name}
+          <Trash2 aria-hidden /> <span className="truncate">Delete {name}</span>
         </Button>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </CardBody>

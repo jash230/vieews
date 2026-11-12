@@ -126,16 +126,36 @@ async function decide(row: ProposalRow, status: ProposalStatus, result: Proposal
 /** The user pressed Approve: create the post exactly as proposed. */
 export async function approveProposal(userId: string, proposalId: string): Promise<ProposalView> {
   const row = await getPending(userId, proposalId);
+  // Claim the proposal before creating the post, so a double click or a retried request can't publish it twice.
+  const { data: claimed, error: claimErr } = await supabaseAdmin()
+    .from("copilot_proposals")
+    .update({ status: "approved", decided_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+  if (claimErr) throw claimErr;
+  if (!claimed) throw new Error("This was already decided");
+  let result: ProposalView["result"];
+  let status: ProposalStatus = "approved";
   try {
     const input = { ...row.input, projectId: row.project_id, meta: { source: "copilot", reason: row.input.reason ?? null } };
     delete input.reason;
     // createPost validates the stored input against createPostSchema itself.
     const post = await createPost(userId, input as unknown as CreatePostInput, "web");
-    return decide(row, "approved", { postId: post.id });
+    result = { postId: post.id };
   } catch (err) {
-    const message = err instanceof PostValidationError || err instanceof Error ? err.message : "Couldn't create the post";
-    return decide(row, "failed", { error: message });
+    status = "failed";
+    result = { error: err instanceof PostValidationError || err instanceof Error ? err.message : "Couldn't create the post" };
   }
+  const { data, error } = await supabaseAdmin()
+    .from("copilot_proposals")
+    .update({ status, result })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return (await toViews(userId, [data as ProposalRow]))[0];
 }
 
 export async function declineProposal(userId: string, proposalId: string): Promise<ProposalView> {
@@ -153,7 +173,8 @@ export async function takeUnreportedDecisions(userId: string, projectId: string)
     .neq("status", "pending")
     .is("reported_at", null);
   if (error) throw error;
-  const rows = (data ?? []) as ProposalRow[];
+  // An approval still creating its post has no result yet: report it once it's known, not as "post undefined".
+  const rows = ((data ?? []) as ProposalRow[]).filter((r) => r.status !== "approved" || r.result);
   if (!rows.length) return [];
   await db.from("copilot_proposals").update({ reported_at: new Date().toISOString() }).in("id", rows.map((r) => r.id));
   return rows.map((r) =>

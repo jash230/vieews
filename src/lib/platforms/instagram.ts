@@ -8,9 +8,22 @@ const DAY = 24 * 60 * 60 * 1000;
 /** Containers usually finish in under a minute; give up after ~15 minutes. */
 const MAX_STATUS_CHECKS = 30;
 
+/** Graph API codes for rate limits and hiccups that go away on their own. */
+const TRANSIENT_CODES = new Set([1, 2, 4, 17, 32, 341, 613]);
+
+type GraphError = { message?: string; code?: number; is_transient?: boolean };
+const isTransient = (e: GraphError | undefined) => !!e && (e.is_transient === true || TRANSIENT_CODES.has(Number(e.code)));
+
 async function igJson(res: Response, what: string) {
+  if (!res.ok) {
+    // Instagram reports rate limits and temporary errors as 400/403 too: retry those instead of failing the post.
+    const body = await res.clone().json().catch(() => null) as { error?: GraphError } | null;
+    if (isTransient(body?.error)) {
+      throw new PlatformError(`${what} failed (${res.status}): ${body?.error?.message ?? "temporary error"}`, { retryable: true, status: res.status });
+    }
+  }
   const json = await (await expectOk(res, what)).json();
-  if (json.error) throw new PlatformError(`${what}: ${json.error.message}`, { retryable: false });
+  if (json.error) throw new PlatformError(`${what}: ${json.error.message}`, { retryable: isTransient(json.error) });
   return json;
 }
 
@@ -55,7 +68,9 @@ export const instagram: PlatformAdapter = {
   async refresh(_account, _refreshToken, accessToken) {
     const res = await fetch(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: "ig_refresh_token", access_token: accessToken })}`);
     if (res.status === 400 || res.status === 401) {
-      throw new PlatformError("Instagram token expired", { retryable: false, reauth: true });
+      // Rate limits and hiccups come back as 400 too: retry those instead of asking the user to reconnect.
+      const body = (await res.clone().json().catch(() => null)) as { error?: GraphError } | null;
+      if (!isTransient(body?.error)) throw new PlatformError("Instagram token expired", { retryable: false, reauth: true });
     }
     const json = await igJson(res, "Instagram token refresh");
     return { accessToken: json.access_token, refreshToken: null, expiresIn: json.expires_in };
@@ -130,13 +145,20 @@ export const instagram: PlatformAdapter = {
       await ctx.sleep(`instagram-wait-${i}`, "30s");
     }
 
-    return ctx.run("instagram-publish", async () => {
-      const token = await ctx.accessToken();
-      const res = await fetch(`${IG_GRAPH}/${igUserId}/media_publish`, { method: "POST", body: form({ creation_id: containerId, access_token: token }) });
-      const mediaId = (await igJson(res, "Instagram publish")).id as string;
-      const linkRes = await fetch(`${IG_GRAPH}/${mediaId}?${new URLSearchParams({ fields: "permalink", access_token: token })}`);
-      const permalink = linkRes.ok ? ((await linkRes.json()).permalink as string | undefined) : undefined;
-      return { remoteId: mediaId, remoteUrl: permalink ?? null };
+    // Publishing and the permalink lookup are separate steps: a hiccup fetching the link must not
+    // re-run media_publish (which fails for an already-published container) and fail a live post.
+    const mediaId = await ctx.run("instagram-publish", async () => {
+      const res = await fetch(`${IG_GRAPH}/${igUserId}/media_publish`, { method: "POST", body: form({ creation_id: containerId, access_token: await ctx.accessToken() }) });
+      return (await igJson(res, "Instagram publish")).id as string;
     });
+    const permalink = await ctx.run("instagram-permalink", async () => {
+      try {
+        const linkRes = await fetch(`${IG_GRAPH}/${mediaId}?${new URLSearchParams({ fields: "permalink", access_token: await ctx.accessToken() })}`);
+        return linkRes.ok ? (((await linkRes.json()).permalink as string | undefined) ?? null) : null;
+      } catch {
+        return null;
+      }
+    });
+    return { remoteId: mediaId, remoteUrl: permalink };
   },
 };

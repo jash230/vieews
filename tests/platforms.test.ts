@@ -69,9 +69,31 @@ describe("YouTube", () => {
     const ranges = calls.filter((c) => c.url.includes("upload.example") && c.init.method === "PUT").map((c) => new Headers(c.init.headers).get("content-range"));
     expect(ranges).toEqual([`bytes */${size}`, `bytes ${YT_CHUNK_BYTES}-${size - 1}/${size}`]);
   });
+  it("recovers the video id when a retry finds the upload already finished", async () => {
+    const calls = mockFetch([
+      [/uploadType=resumable/, () => new Response(null, { headers: { location: "https://upload.example/s" } })],
+      [/upload\.example\/s/, () => json({ id: "done1" })],
+    ]);
+    const { ctx } = fakeCtx({ media: { size_bytes: 10 }, options: { platform: "youtube", youtube: { title: "t", privacy: "public" } } });
+    expect(await youtube.publish(ctx)).toEqual({ remoteId: "done1", remoteUrl: "https://www.youtube.com/watch?v=done1" });
+    expect(calls.some((c) => c.url.includes("storage.example"))).toBe(false);
+  });
 });
 
 describe("Instagram", () => {
+  it("retries a rate-limited token refresh instead of asking to reconnect", async () => {
+    mockFetch([[/refresh_access_token/, () => json({ error: { message: "Application request limit reached", code: 4 } }, { status: 400 })]]);
+    const err = await instagram.refresh({} as never, null, "tok").catch((e) => e);
+    expect(err.opts).toMatchObject({ retryable: true });
+    expect(err.opts.reauth).toBeFalsy();
+  });
+
+  it("asks to reconnect when the refresh token is really dead", async () => {
+    mockFetch([[/refresh_access_token/, () => json({ error: { message: "Session has expired", code: 190 } }, { status: 400 })]]);
+    const err = await instagram.refresh({} as never, null, "tok").catch((e) => e);
+    expect(err.opts).toMatchObject({ retryable: false, reauth: true });
+  });
+
   it("creates a reel container, waits for processing, then publishes", async () => {
     let checks = 0;
     const calls = mockFetch([
@@ -86,7 +108,7 @@ describe("Instagram", () => {
     expect(result).toEqual({ remoteId: "media9", remoteUrl: "https://www.instagram.com/reel/abc/" });
     const body = new URLSearchParams(String(calls[0].init.body));
     expect(Object.fromEntries(body)).toMatchObject({ media_type: "REELS", video_url: "https://storage.example/media.mp4", caption: "new reel", share_to_feed: "false" });
-    expect(steps).toEqual(["instagram-container", "instagram-status-0", "instagram-wait-0", "instagram-status-1", "instagram-wait-1", "instagram-status-2", "instagram-publish"]);
+    expect(steps).toEqual(["instagram-container", "instagram-status-0", "instagram-wait-0", "instagram-status-1", "instagram-wait-1", "instagram-status-2", "instagram-publish", "instagram-permalink"]);
   });
 
   it("sends stories without a caption", async () => {
@@ -130,6 +152,25 @@ describe("Instagram", () => {
     expect(creates[3]).toMatchObject({ media_type: "CAROUSEL", children: "child1,child2,child3", caption: "swipe →" });
   });
 
+  it("still succeeds when the permalink lookup fails after publishing", async () => {
+    mockFetch([
+      [(u, i) => u.endsWith("/media") && i.method === "POST", () => json({ id: "c" })],
+      [/\/c\?/, () => json({ status_code: "FINISHED" })],
+      [/media_publish/, () => json({ id: "m" })],
+      [/\/m\?/, () => {
+        throw new TypeError("fetch failed");
+      }],
+    ]);
+    const { ctx } = fakeCtx({ options: { platform: "instagram", instagram: { format: "reel" } } });
+    expect(await instagram.publish(ctx)).toEqual({ remoteId: "m", remoteUrl: null });
+  });
+
+  it("retries Instagram's transient errors even when they come as 400", async () => {
+    mockFetch([[(u, i) => u.endsWith("/media") && i.method === "POST", () => json({ error: { message: "Please retry", code: 2, is_transient: true } }, { status: 400 })]]);
+    const { ctx } = fakeCtx({ options: { platform: "instagram", instagram: { format: "reel" } } });
+    await expect(instagram.publish(ctx)).rejects.toMatchObject({ opts: { retryable: true } });
+  });
+
   it("fails without retry when processing errors", async () => {
     mockFetch([
       [(u, i) => u.endsWith("/media") && i.method === "POST", () => json({ id: "c" })],
@@ -146,7 +187,7 @@ describe("TikTok", () => {
     expect(tiktokChunkPlan(25 * MB)).toEqual({ chunkSize: 10 * MB, totalChunks: 2 });
     const plan = tiktokChunkPlan(25 * MB);
     expect(chunkRange(1, plan, 25 * MB)).toEqual({ start: 10 * MB, end: 25 * MB - 1 }); // last chunk takes the remainder
-    expect(tiktokChunkPlan(7 * MB)).toEqual({ chunkSize: 10 * MB, totalChunks: 1 });
+    expect(tiktokChunkPlan(7 * MB)).toEqual({ chunkSize: 7 * MB, totalChunks: 1 }); // never a chunk bigger than the file
   });
 
   const creator = { creator_username: "zaza", creator_nickname: "Zaza", privacy_level_options: ["SELF_ONLY", "PUBLIC_TO_EVERYONE"], comment_disabled: true, duet_disabled: false, stitch_disabled: false, max_video_post_duration_sec: 600 };

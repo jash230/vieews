@@ -1,5 +1,6 @@
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Logo } from "@/components/app/logo";
 import { NavTabs } from "@/components/app/nav";
@@ -9,6 +10,9 @@ import { CopilotRail, CopilotToggle, CopilotUIProvider } from "@/components/copi
 import { Skeleton } from "@/components/ui/misc";
 import { getCurrentProject } from "@/lib/projects/current";
 import { listProjectOptions } from "@/lib/projects/options";
+
+// Signed-in pages are private: keep them (and their sign-in redirects) out of search results.
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 // The app shell: the sidebar on the left, the workspace in the middle, the copilot docked on the right.
 
@@ -64,7 +68,8 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         </aside>
 
         <div className="flex min-h-0 flex-1">
-          <main id="main" className="min-w-0 flex-1 overflow-y-auto">
+          {/* tabIndex lets "Skip to content" actually move keyboard focus here, not just scroll. */}
+          <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
             <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
           </main>
           <Suspense fallback={<CopilotSkeleton />}>

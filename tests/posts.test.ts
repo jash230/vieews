@@ -25,6 +25,10 @@ describe("createPostSchema", () => {
     expect(mediaIdsOf(parsed)).toEqual([id(1), id(2)]);
   });
 
+  it("rejects listing the same account twice", () => {
+    expect(createPostSchema.safeParse({ mediaAssetId: id(1), targets: [target, target] }).success).toBe(false);
+  });
+
   it("caps meta at 16 KB", () => {
     const big = { notes: "x".repeat(17 * 1024) };
     expect(createPostSchema.safeParse({ mediaAssetId: id(1), meta: big, targets: [target] }).success).toBe(false);

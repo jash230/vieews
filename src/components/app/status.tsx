@@ -16,6 +16,11 @@ const STATUS: Record<PostStatus | TargetStatus, { label: string; icon: typeof Cl
   canceled: { label: "Canceled", icon: Ban, className: "bg-muted text-muted-foreground" },
 };
 
+/** "Partly published" rather than "partial", for titles and labels. */
+export function statusLabel(status: PostStatus | TargetStatus): string {
+  return STATUS[status].label;
+}
+
 export function StatusBadge({ status, className }: { status: PostStatus | TargetStatus; className?: string }) {
   const s = STATUS[status];
   const Icon = s.icon;

@@ -59,29 +59,36 @@ export async function failStaleTargets(postId?: string): Promise<number> {
     .in("status", [...IN_FLIGHT])
     .lt("started_at", new Date(Date.now() - STALE_AFTER_MS).toISOString());
   if (postId) q = q.eq("post_id", postId);
-  const { data } = await q.select("post_id");
+  // An error must surface (the cron reports it), not read as "nothing was stale".
+  const { data, error } = await q.select("post_id");
+  if (error) throw new Error(error.message);
   for (const id of new Set((data ?? []).map((t) => t.post_id as string))) await refreshPostStatus(id);
   return data?.length ?? 0;
 }
 
 /** Fails every target of the post that never started, e.g. when its workflow gave up. */
 export async function failPendingTargets(postId: string, message: string) {
-  await supabaseAdmin()
+  const { error } = await supabaseAdmin()
     .from("post_targets")
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("post_id", postId)
     .eq("status", "pending");
+  if (error) throw new Error(error.message);
   await refreshPostStatus(postId);
 }
 
 /** Posts the daily cron should restart: overdue scheduled ones and stalled publishing ones. */
 export async function findStalledPosts(): Promise<string[]> {
-  const { data } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("posts")
     .select("id, status, scheduled_for, updated_at, targets:post_targets(status)")
     .in("status", ["scheduled", "publishing"])
+    // Only overdue scheduled posts or publishing ones: future scheduled posts would crowd them out of the limit.
+    .or(`status.eq.publishing,scheduled_for.lt."${new Date(Date.now() - HEAL_AFTER_MS).toISOString()}"`)
     .lt("updated_at", new Date(Date.now() - HEAL_AFTER_MS).toISOString())
+    .order("updated_at")
     .limit(100);
+  if (error) throw new Error(error.message);
   const posts = (data ?? []) as unknown as (Parameters<typeof needsRestart>[0] & { id: string })[];
   return posts.filter((p) => needsRestart(p)).map((p) => p.id);
 }
@@ -96,18 +103,31 @@ export type PublishPlan =
 /** Decides whether a post is due, and if so marks it publishing and lists what's left to post. */
 export async function planPublish(postId: string): Promise<PublishPlan> {
   const db = supabaseAdmin();
-  const { data: post } = await db.from("posts").select("status, scheduled_for").eq("id", postId).maybeSingle();
+  // A database error must throw (so the step retries), not read as "the post is gone".
+  const { data: post, error: postErr } = await db.from("posts").select("status, scheduled_for").eq("id", postId).maybeSingle();
+  if (postErr) throw new Error(postErr.message);
   if (!post || post.status === "canceled") return { kind: "skip" };
   // Re-read on every wake-up, so a canceled, deleted or rescheduled post is never published early.
   if (post.scheduled_for && new Date(post.scheduled_for).getTime() > Date.now()) return { kind: "wait", until: post.scheduled_for };
 
-  const { data: pending } = await db.from("post_targets").select("id, social_account_id").eq("post_id", postId).eq("status", "pending").order("created_at");
+  const { data: pending, error: pendingErr } = await db
+    .from("post_targets")
+    .select("id, social_account_id")
+    .eq("post_id", postId)
+    .eq("status", "pending")
+    .order("created_at");
+  if (pendingErr) throw new Error(pendingErr.message);
   // Nothing left (another run got there first): derive the status instead of leaving it "publishing".
   if (!pending?.length) {
     await refreshPostStatus(postId);
     return { kind: "skip" };
   }
-  if (post.status !== "publishing") await db.from("posts").update({ status: "publishing" }).eq("id", postId);
+  if (post.status !== "publishing") {
+    // Only from the status we read: a cancel that lands in between wins instead of being overwritten.
+    const { data: moved, error: moveErr } = await db.from("posts").update({ status: "publishing" }).eq("id", postId).eq("status", post.status).select("id");
+    if (moveErr) throw new Error(moveErr.message);
+    if (!moved?.length) return { kind: "skip" };
+  }
   const byAccount = new Map<string, string[]>();
   for (const t of pending) byAccount.set(t.social_account_id as string, [...(byAccount.get(t.social_account_id as string) ?? []), t.id as string]);
   return { kind: "go", byAccount: [...byAccount.values()] };
@@ -121,27 +141,34 @@ export interface StepRunner {
 
 export async function failTarget(targetId: string, message: string) {
   const db = supabaseAdmin();
-  const { data } = await db
+  // Never over a finished target: a late failure report must not turn a live post into a "failed"
+  // one whose Retry would post it a second time.
+  const { data, error } = await db
     .from("post_targets")
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("id", targetId)
+    .in("status", ["pending", ...IN_FLIGHT])
     .select("post_id")
-    .single();
+    .maybeSingle();
+  if (error) throw new Error(error.message);
   if (data) await refreshPostStatus(data.post_id);
 }
 
 /** Moves a pending target to uploading. False when it's gone or someone else already claimed it. */
 export async function claimTarget(targetId: string): Promise<boolean> {
   const db = supabaseAdmin();
-  const { data: target } = await db.from("post_targets").select("status, attempts").eq("id", targetId).single();
+  const { data: target, error: readErr } = await db.from("post_targets").select("status, attempts").eq("id", targetId).maybeSingle();
+  if (readErr) throw new Error(readErr.message);
   if (!target || target.status !== "pending") return false;
-  const { data } = await db
+  const { data, error } = await db
     .from("post_targets")
     .update({ status: "uploading", attempts: target.attempts + 1, started_at: new Date().toISOString(), error: null })
     .eq("id", targetId)
     .eq("status", "pending")
     .eq("attempts", target.attempts)
     .select("id");
+  // A failed write must retry the step, not read as "someone else claimed it" and leave it pending.
+  if (error) throw new Error(error.message);
   return !!data?.length;
 }
 
@@ -161,13 +188,16 @@ async function loadItems(post: PostRow): Promise<MediaAssetRow[]> {
 export async function publishClaimedTarget(targetId: string, steps: StepRunner): Promise<PublishResult> {
   const db = supabaseAdmin();
   // Rows are re-read on every invocation (they're cheap) so tokens never land in step state.
-  const { data: targetRow } = await db.from("post_targets").select("*").eq("id", targetId).single();
+  // Read errors are plain Errors (retried); only a row that is really gone is non-retriable.
+  const { data: targetRow, error: targetErr } = await db.from("post_targets").select("*").eq("id", targetId).maybeSingle();
+  if (targetErr) throw new Error(targetErr.message);
   if (!targetRow) throw new NonRetriableError("Target no longer exists");
   const target = targetRow as PostTargetRow;
-  const [{ data: postRow }, { data: accountRow }] = await Promise.all([
-    db.from("posts").select("*").eq("id", target.post_id).single(),
-    db.from("social_accounts").select("*").eq("id", target.social_account_id).single(),
+  const [{ data: postRow, error: postErr }, { data: accountRow, error: accountErr }] = await Promise.all([
+    db.from("posts").select("*").eq("id", target.post_id).maybeSingle(),
+    db.from("social_accounts").select("*").eq("id", target.social_account_id).maybeSingle(),
   ]);
+  if (postErr || accountErr) throw new Error((postErr ?? accountErr)!.message);
   if (!postRow) throw new NonRetriableError("Post no longer exists");
   if (!accountRow) throw new NonRetriableError("This account was disconnected");
   const post = postRow as PostRow;
@@ -200,7 +230,8 @@ export async function publishClaimedTarget(targetId: string, steps: StepRunner):
     appItemUrls: () => items.map((m) => appMediaUrl(m)),
     setStatus: async (status) => {
       await steps.run(`status-${status}`, async () => {
-        await db.from("post_targets").update({ status }).eq("id", targetId);
+        const { error } = await db.from("post_targets").update({ status }).eq("id", targetId);
+        if (error) throw new Error(error.message);
       });
     },
   };
@@ -208,10 +239,13 @@ export async function publishClaimedTarget(targetId: string, steps: StepRunner):
   const result = await adapters[target.platform].publish(ctx);
 
   await steps.run("mark-published", async () => {
-    await db
+    // The post is live: a failed write must throw so the step retries, or the remote id is lost
+    // and the target later times out as failed (inviting a Retry that posts it twice).
+    const { error } = await db
       .from("post_targets")
       .update({ status: "published", remote_id: result.remoteId, remote_url: result.remoteUrl, finished_at: new Date().toISOString(), error: null })
       .eq("id", targetId);
+    if (error) throw new Error(error.message);
     await refreshPostStatus(post.id);
   });
   return result;

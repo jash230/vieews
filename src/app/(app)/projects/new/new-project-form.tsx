@@ -24,7 +24,8 @@ export function NewProjectForm() {
       const res = mode === "link" ? await createProjectFromLinkAction(link) : await createBlankProjectAction(name);
       if (!res.ok) return setError(res.error);
       const { warnings } = res.data;
-      const qs = warnings.length ? `?${new URLSearchParams({ warning: warnings.join(" ") })}` : "?review=1";
+      // "Review" copy only makes sense when the details were drafted from a link.
+      const qs = warnings.length ? `?${new URLSearchParams({ warning: warnings.join(" ") })}` : mode === "link" ? "?review=1" : "";
       router.push(`/projects/${res.data.projectId}${qs}`);
     });
   }

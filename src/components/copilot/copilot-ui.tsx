@@ -46,6 +46,29 @@ export function useStored(key: string): [string | null, (value: string) => void]
   return [value, set];
 }
 
+/**
+ * False until a couple of frames after hydration. Saved preferences (collapsed, width) only apply
+ * once the page hydrates, so transitions stay off until then: the panel snaps to its saved state
+ * instead of visibly sliding there on every page load.
+ */
+let settled = false;
+const settledListeners = new Set<() => void>();
+function subscribeSettled(onChange: () => void) {
+  settledListeners.add(onChange);
+  if (!settled) {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        settled = true;
+        settledListeners.forEach((l) => l());
+      }),
+    );
+  }
+  return () => void settledListeners.delete(onChange);
+}
+export function useSettled(): boolean {
+  return useSyncExternalStore(subscribeSettled, () => settled, () => false);
+}
+
 /** True from lg up, where the copilot is docked instead of an overlay. */
 function useIsDesktop() {
   return useSyncExternalStore(
@@ -121,11 +144,13 @@ export function CopilotRail() {
   const { open, setOpen, collapsed, setCollapsed } = useCopilotUI();
   const desktop = useIsDesktop();
   const hidden = desktop && !collapsed;
+  const settledUI = useSettled();
   return (
     <div
       className={cn(
         "hidden shrink-0 overflow-hidden border-border bg-surface transition-[width,visibility] duration-300 ease-out md:flex",
         hidden ? "invisible w-0" : "w-16 border-l",
+        !settledUI && "transition-none",
       )}
     >
       <div className="flex w-16 shrink-0 flex-col items-center py-4">

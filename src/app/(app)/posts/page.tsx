@@ -15,6 +15,9 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Posts" };
 
+const PAGE = 100;
+const MAX_SHOWN = 1000;
+
 const FILTERS: { key: string; label: string; status?: PostStatus[] }[] = [
   { key: "all", label: "All" },
   { key: "scheduled", label: "Scheduled", status: ["scheduled"] },
@@ -22,6 +25,14 @@ const FILTERS: { key: string; label: string; status?: PostStatus[] }[] = [
   { key: "published", label: "Published", status: ["published", "partial"] },
   { key: "failed", label: "Failed", status: ["failed", "partial"] },
 ];
+
+// "No in progress posts" reads oddly; each filter says it plainly.
+const EMPTY: Record<string, string> = {
+  scheduled: "Nothing scheduled",
+  publishing: "Nothing publishing right now",
+  published: "Nothing published yet",
+  failed: "No failed posts",
+};
 
 export default function PostsPage({ searchParams }: PageProps<"/posts">) {
   return (
@@ -73,7 +84,13 @@ async function PostList({ searchParams }: Pick<PageProps<"/posts">, "searchParam
   const filter = FILTERS.find((f) => f.key === sp.filter) ?? FILTERS[0];
   const project = await getCurrentProject(userId);
   if (!project) return <NoProject />;
-  const posts = await listPosts(userId, { projectId: project.id, status: filter.status, upcoming: filter.key === "scheduled", limit: 100 });
+  // "Show more" grows the page by PAGE posts at a time (capped), so older posts stay reachable.
+  const requested = Number(typeof sp.show === "string" ? sp.show : PAGE);
+  const limit = Math.min(Math.max(Number.isFinite(requested) ? Math.floor(requested) : PAGE, PAGE), MAX_SHOWN);
+  const posts = await listPosts(userId, { projectId: project.id, status: filter.status, upcoming: filter.key === "scheduled", limit });
+  const moreHref = posts.length === limit && limit < MAX_SHOWN
+    ? `/posts?${new URLSearchParams({ ...(filter.key === "all" ? {} : { filter: filter.key }), show: String(limit + PAGE) })}`
+    : null;
   const thumbs = await signedReadUrls(posts.map((p) => p.media?.thumbnail_path ?? ""));
 
   return (
@@ -81,18 +98,35 @@ async function PostList({ searchParams }: Pick<PageProps<"/posts">, "searchParam
       <FilterNav active={filter.key} />
       <Card>
         {posts.length === 0 ? (
-          <EmptyState
-            icon={<CalendarClock />}
-            title={filter.key === "all" ? "No posts yet" : `No ${filter.label.toLowerCase()} posts`}
-            description="Posts you create here or through the AI show up in this list."
-            action={<ButtonLink href="/compose">Create post</ButtonLink>}
-          />
+          filter.key === "all" ? (
+            <EmptyState
+              icon={<CalendarClock />}
+              title="No posts yet"
+              description="Posts you create here or through the copilot show up in this list."
+              action={<ButtonLink href="/compose">Create post</ButtonLink>}
+            />
+          ) : (
+            // A filter with nothing in it isn't a reason to make a new post: offer the way back.
+            <EmptyState
+              icon={<CalendarClock />}
+              title={EMPTY[filter.key] ?? "Nothing here"}
+              description={`${project.name} has no posts in “${filter.label}”.`}
+              action={<ButtonLink href="/posts" variant="secondary">Show all posts</ButtonLink>}
+            />
+          )
         ) : (
           <ul className="divide-y divide-border">
             {posts.map((p) => <PostRow key={p.id} post={p} thumbUrl={thumbs[p.media?.thumbnail_path ?? ""]} />)}
           </ul>
         )}
       </Card>
+      {moreHref && (
+        <div className="mt-4 flex justify-center">
+          <Link href={moreHref} scroll={false} className="inline-flex min-h-11 items-center rounded-full border border-border bg-background px-5 text-sm font-semibold text-muted-foreground hover:border-border-strong hover:text-foreground">
+            Show more posts
+          </Link>
+        </div>
+      )}
     </>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmDiscardUnsaved } from "@/components/app/unsaved-guard";
 import { Check, ChevronsUpDown, Plus, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,6 +38,7 @@ export function ProjectSwitcher({
   const [pending, start] = useTransition();
   const [switching, setSwitching] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const current = projects.find((p) => p.id === currentId) ?? null;
   const shown = query ? projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())) : projects;
@@ -44,17 +46,26 @@ export function ProjectSwitcher({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Escape hands focus back to the button, so keyboard users aren't dropped at the top of the page.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
     window.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
+      // Each opening starts from the full list.
+      setQuery("");
     };
   }, [open]);
 
   function pick(id: string) {
     if (id === currentId) return setOpen(false);
+    // Switching reloads the page's data, which would wipe an unposted upload in the composer.
+    if (!confirmDiscardUnsaved()) return;
     setSwitching(id);
     start(async () => {
       const res = await switchProjectAction(id);
@@ -69,19 +80,26 @@ export function ProjectSwitcher({
 
   const chip = variant === "chip";
   return (
-    <div ref={root} className={cn("relative", className)}>
+    <div
+      ref={root}
+      className={cn("relative min-w-0", className)}
+      // Tabbing out closes it instead of leaving it open over the page. (No relatedTarget means a click,
+      // which Safari doesn't focus; the outside-pointer handler covers those.)
+      onBlur={(e) => open && e.relatedTarget && !root.current?.contains(e.relatedTarget) && setOpen(false)}
+    >
       <button
+        ref={trigger}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
+        aria-haspopup="true"
         aria-expanded={open}
-        aria-controls={listId}
+        aria-controls={open ? listId : undefined}
         aria-label={`Project: ${current?.name ?? "none"}. Switch project`}
         className={cn(
           "flex min-w-0 items-center gap-2 text-left transition-colors duration-150",
           chip
-            ? "min-h-9 max-w-[12rem] rounded-full border border-border bg-background py-1 pl-1 pr-2.5 text-xs font-bold hover:border-border-strong"
-            : "min-h-11 max-w-[16rem] rounded-2xl px-2 hover:bg-primary-soft",
+            ? "min-h-10 max-w-[12rem] rounded-full border border-border bg-background py-1 pl-1 pr-2.5 text-xs font-bold hover:border-border-strong"
+            : "min-h-11 w-full max-w-[16rem] rounded-2xl px-2 hover:bg-primary-soft",
         )}
       >
         {current ? <ProjectIcon name={current.name} url={current.iconUrl} size={chip ? 24 : 32} /> : <span className="grid size-8 place-items-center rounded-xl bg-muted"><Plus className="size-4" aria-hidden /></span>}
@@ -106,11 +124,12 @@ export function ProjectSwitcher({
               className="mb-1 min-h-10 w-full rounded-xl border border-border px-3 text-sm focus-visible:border-accent focus-visible:outline-none"
             />
           )}
-          <ul id={listId} role="listbox" aria-label="Projects" className="max-h-72 overflow-y-auto">
+          <ul id={listId} aria-label="Projects" className="max-h-72 overflow-y-auto">
             {shown.map((p) => (
-              <li key={p.id} role="option" aria-selected={p.id === currentId}>
+              <li key={p.id}>
                 <button
                   type="button"
+                  aria-current={p.id === currentId || undefined}
                   onClick={() => pick(p.id)}
                   disabled={pending}
                   className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2 text-left text-sm font-semibold hover:bg-primary-soft disabled:opacity-60"

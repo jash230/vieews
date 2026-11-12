@@ -127,9 +127,10 @@ export const youtube: PlatformAdapter = {
 /** Uploads in chunks, resuming from whatever YouTube already has (so step retries continue). */
 export async function uploadResumable(uploadUrl: string, total: number, mime: string, mediaUrl: () => Promise<string>): Promise<string> {
   let offset = await queryOffset(uploadUrl, total);
+  // A retry after the last chunk landed (but its response was lost): YouTube answers with the video.
+  if (typeof offset === "object") return offset.id;
   const source = await mediaUrl();
   while (true) {
-    if (offset === "done") throw new PlatformError("YouTube already has this upload but its video id was lost. Check YouTube Studio before retrying.", { retryable: false });
     const start = offset;
     const end = Math.min(start + YT_CHUNK_BYTES, total) - 1;
     const chunk = await fetchRange(source, start, end);
@@ -147,9 +148,13 @@ export async function uploadResumable(uploadUrl: string, total: number, mime: st
   }
 }
 
-async function queryOffset(uploadUrl: string, total: number): Promise<number | "done"> {
+async function queryOffset(uploadUrl: string, total: number): Promise<number | { id: string }> {
   const res = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Length": "0", "Content-Range": `bytes */${total}` } });
-  if (res.status === 200 || res.status === 201) return "done";
+  if (res.status === 200 || res.status === 201) {
+    const json = (await res.json().catch(() => null)) as { id?: string } | null;
+    if (json?.id) return { id: json.id };
+    throw new PlatformError("YouTube already has this upload but its video id was lost. Check YouTube Studio before retrying.", { retryable: false });
+  }
   if (res.status === 308) return nextOffset(res.headers.get("range"));
   await expectOk(res, "YouTube upload status");
   return 0;

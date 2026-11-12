@@ -135,7 +135,14 @@ export async function createBlankProjectAction(name: string) {
 
 export async function updateProjectAction(projectId: string, patch: Pick<ProjectInput, "name" | "storeUrl" | "notes" | "kit">) {
   return run(async (userId) => {
-    await updateProject(userId, projectId, patch);
+    // Server actions take whatever the client sends: pass on only the fields this form may change.
+    const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+    const safe: Partial<ProjectInput> = {};
+    if (str(patch?.name) !== undefined) safe.name = str(patch.name);
+    if (patch?.storeUrl === null || str(patch?.storeUrl) !== undefined) safe.storeUrl = patch.storeUrl;
+    if (str(patch?.notes) !== undefined) safe.notes = str(patch.notes);
+    if (patch?.kit && typeof patch.kit === "object") safe.kit = patch.kit;
+    await updateProject(userId, projectId, safe);
     revalidateApp();
   });
 }

@@ -11,6 +11,7 @@ function table() {
     update: (p: Record<string, unknown>) => ((patch = p), q),
     eq: (k: string, v: unknown) => (filters.push([k, v]), q),
     single: async () => ({ data: matches() ? { ...row } : null }),
+    maybeSingle: async () => ({ data: matches() ? { ...row } : null, error: null }),
     then: (resolve: (v: unknown) => void) => {
       const hit = matches();
       if (hit && patch) Object.assign(row, patch);

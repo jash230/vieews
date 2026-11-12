@@ -59,8 +59,27 @@ export async function saveConnectedAccount(userId: string, platform: Platform, t
 }
 
 export async function disconnectAccount(userId: string, accountId: string) {
-  const { error } = await supabaseAdmin().from("social_accounts").delete().eq("user_id", userId).eq("id", accountId);
+  const db = supabaseAdmin();
+  // Its post targets cascade away, so re-derive those posts' status afterwards (or they'd stay "publishing").
+  // Only this user's account: otherwise a guessed id would re-derive someone else's posts.
+  const { data: owned, error: ownErr } = await db.from("social_accounts").select("id").eq("user_id", userId).eq("id", accountId).maybeSingle();
+  if (ownErr) throw ownErr;
+  if (!owned) return;
+  // Only posts still on their way out. Finished posts keep the status they went out with: re-deriving
+  // a published post whose only target was this account would turn it "canceled" (no targets left).
+  const { data: affected, error: affErr } = await db
+    .from("post_targets")
+    .select("post_id, post:posts!inner(status)")
+    .eq("user_id", userId)
+    .eq("social_account_id", accountId)
+    .in("post.status", ["scheduled", "publishing"]);
+  if (affErr) throw affErr;
+  const { error } = await db.from("social_accounts").delete().eq("user_id", userId).eq("id", accountId);
   if (error) throw error;
+  const { refreshPostStatus } = await import("@/lib/posts/service");
+  for (const postId of new Set((affected ?? []).map((t) => t.post_id as string))) {
+    await refreshPostStatus(postId).catch((err) => console.error(err));
+  }
 }
 
 export async function markNeedsReauth(accountId: string, message: string) {
@@ -79,7 +98,14 @@ export async function getValidAccessToken(account: SocialAccountRow): Promise<st
   try {
     next = await adapter.refresh(account, refreshToken, accessToken);
   } catch (err) {
-    if (err instanceof PlatformError && err.opts.reauth) await markNeedsReauth(account.id, err.message);
+    if (err instanceof PlatformError && err.opts.reauth) {
+      // Two runs refreshing at once (two posts due together, or the composer and a publish): the
+      // other one may have rotated the refresh token first. Use its fresh token instead of asking
+      // the user to reconnect an account that works.
+      const fresh = await refreshedElsewhere(account);
+      if (fresh) return fresh;
+      await markNeedsReauth(account.id, err.message);
+    }
     throw err;
   }
   const patch = {
@@ -94,4 +120,13 @@ export async function getValidAccessToken(account: SocialAccountRow): Promise<st
   if (error) throw error;
   Object.assign(account, patch, { updated_at: new Date().toISOString() });
   return next.accessToken;
+}
+
+/** The account's token when another run refreshed it since `account` was read, else null. */
+async function refreshedElsewhere(account: SocialAccountRow): Promise<string | null> {
+  const { data } = await supabaseAdmin().from("social_accounts").select("*").eq("id", account.id).maybeSingle();
+  const latest = data as SocialAccountRow | null;
+  if (!latest || latest.access_token_enc === account.access_token_enc || adapters[account.platform].needsRefresh(latest)) return null;
+  Object.assign(account, latest);
+  return decryptSecret(latest.access_token_enc, env.tokenEncryptionKey());
 }

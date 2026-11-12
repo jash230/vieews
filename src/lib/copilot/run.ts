@@ -8,7 +8,7 @@ import { getProject, listProjectAccounts, listProjectMedia } from "@/lib/project
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import type { MediaAssetRow } from "@/lib/types";
 import { recordClaudeUsage } from "@/lib/usage/service";
-import { appendRow, dropDeclinedBlocks, loadRows, toApiMessages } from "./history";
+import { appendRow, dropDeclinedBlocks, loadRows, REPLAY_READ_ROWS, toApiMessages } from "./history";
 import { projectContext, STABLE_SYSTEM } from "./prompt";
 import { takeUnreportedDecisions } from "./proposals";
 import { runTool, TOOL_DEFINITIONS, toolLabel } from "./tools";
@@ -86,7 +86,7 @@ export async function* runTurn(input: TurnInput): AsyncGenerator<CopilotEvent> {
         ),
       },
     ];
-    const messages = toApiMessages(await loadRows(userId, projectId));
+    const messages = toApiMessages(await loadRows(userId, projectId, REPLAY_READ_ROWS));
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const stream = client.beta.messages.stream(

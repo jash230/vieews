@@ -4,7 +4,7 @@
 // MIT, kokonutui.com): the approval card with hold-to-confirm and the folded one-line trace for tool calls,
 // restyled to Vieews tokens and shaped around post proposals.
 
-import { format } from "date-fns";
+import { LocalTime } from "@/components/app/local-time";
 import { AlertTriangle, Ban, CalendarClock, CheckCircle2, ChevronRight, Clock, Play, Send } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import Link from "next/link";
@@ -158,6 +158,11 @@ function HoldToApprove({ label, onConfirm, disabled }: { label: string; onConfir
           }
         }}
         onKeyUp={(e) => (e.key === " " || e.key === "Enter") && stop()}
+        // Screen readers and switch devices send a plain click (detail 0) and can't hold: treat it as confirmed.
+        // Real keyboard presses never get here, since keydown above prevents their click.
+        onClick={(e) => {
+          if (e.detail === 0 && !disabled) onConfirm();
+        }}
         onPointerDown={start}
         onPointerUp={stop}
         onPointerLeave={stop}
@@ -225,7 +230,7 @@ export function PostApprovalCard({
           <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary">
             {when ? <CalendarClock className="size-4" aria-hidden /> : <Send className="size-4" aria-hidden />}
           </span>
-          <h3 id={titleId} className="text-sm font-bold">{when ? `Schedule for ${format(when, "EEE MMM d, h:mm a")}` : "Post now"}</h3>
+          <h3 id={titleId} className="text-sm font-bold">{input.scheduledFor ? <>Schedule for <LocalTime iso={input.scheduledFor} fmt="EEE MMM d, h:mm a" /></> : "Post now"}</h3>
           {badge && (
             <span className={cn("ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold", badge.className)}>
               <badge.icon className="size-3.5" aria-hidden />

@@ -17,7 +17,7 @@ interface KeyView {
   lastUsed: string | null;
 }
 
-function CopyBlock({ label, text }: { label: string; text: string }) {
+function CopyBlock({ label, text, autoFocus }: { label: string; text: string; autoFocus?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div>
@@ -26,11 +26,16 @@ function CopyBlock({ label, text }: { label: string; text: string }) {
         <pre className="whitespace-pre-wrap rounded-xl border border-border bg-surface p-3.5 pr-14 text-[13px] leading-relaxed [overflow-wrap:anywhere]"><code>{text}</code></pre>
         <button
           type="button"
+          autoFocus={autoFocus}
           aria-label={copied ? "Copied" : `Copy ${label}`}
           onClick={async () => {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+              await navigator.clipboard.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            } catch {
+              toast.error("Couldn't copy. Select the text and copy it yourself.");
+            }
           }}
           className="absolute right-1.5 top-1.5 grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
         >
@@ -82,7 +87,8 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
               Copy this key now. You won&apos;t be able to see it again.
             </Notice>
           )}
-          {newKey && <CopyBlock label="Your new key" text={newKey} />}
+          {/* Focus lands on its Copy button, so the one-time key is on screen and one keypress from copied. */}
+          {newKey && <CopyBlock key={newKey} label="Your new key" text={newKey} autoFocus />}
         </CardBody>
       </Card>
 
@@ -110,33 +116,41 @@ export function ApiKeyManager({ keys, mcpUrl }: { keys: KeyView[]; mcpUrl: strin
           <EmptyState icon={<KeyRound />} title="No keys yet" description="Create a key above to let an AI agent post for you." />
         ) : (
           <ul className="divide-y divide-border">
-            {keys.map((k) => (
-              <li key={k.id} className="flex items-center gap-4 px-5 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{k.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
-                  </p>
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
-                    start(async () => {
-                      const res = await revokeApiKeyAction(k.id);
-                      if (res.ok) toast.success(`Revoked "${k.name}"`);
-                      else setError(res.error);
-                    });
-                  }}
-                >
-                  <Trash2 aria-hidden /> Revoke
-                </Button>
-              </li>
-            ))}
+            {keys.map((k) => <KeyRow key={k.id} k={k} />)}
           </ul>
         )}
       </Card>
     </div>
+  );
+}
+
+/** One key, with its own pending state so revoking one doesn't spin or disable the rest of the page. */
+function KeyRow({ k }: { k: KeyView }) {
+  const [pending, start] = useTransition();
+  return (
+    <li className="flex items-center gap-4 px-5 py-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">{k.name}</p>
+        <p className="text-xs text-muted-foreground">
+          <code>{k.prefix}…</code> · created {k.created} · {k.lastUsed ? `last used ${k.lastUsed}` : "never used"}
+        </p>
+      </div>
+      <Button
+        variant="destructive"
+        size="sm"
+        loading={pending}
+        aria-label={`Revoke ${k.name}`}
+        onClick={() => {
+          if (!confirm(`Revoke "${k.name}"? Anything using it will stop working.`)) return;
+          start(async () => {
+            const res = await revokeApiKeyAction(k.id);
+            if (res.ok) toast.success(`Revoked "${k.name}"`);
+            else toast.error(res.error);
+          });
+        }}
+      >
+        {!pending && <Trash2 aria-hidden />} Revoke
+      </Button>
+    </li>
   );
 }

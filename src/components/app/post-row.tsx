@@ -1,11 +1,12 @@
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { Film, ImageIcon } from "lucide-react";
 import Link from "next/link";
 import type { PostWithTargets } from "@/lib/posts/service";
 import { PostRowItem } from "./deleted-posts";
-import { PlatformIcon } from "./platform";
+import { LocalTime } from "./local-time";
+import { PLATFORM_META, PlatformIcon } from "./platform";
 import { PostMenu } from "./post-menu";
-import { StatusBadge } from "./status";
+import { StatusBadge, statusLabel } from "./status";
 
 const DOT: Record<string, string> = {
   published: "bg-success",
@@ -16,7 +17,7 @@ const DOT: Record<string, string> = {
 
 export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: string }) {
   const when = post.scheduled_for && post.status === "scheduled"
-    ? `Scheduled for ${format(new Date(post.scheduled_for), "EEE d MMM, h:mm a")}`
+    ? <>Scheduled for <LocalTime iso={post.scheduled_for} fmt="EEE d MMM, h:mm a" /></>
     : formatDistanceToNow(new Date(post.created_at), { addSuffix: true });
   return (
     <PostRowItem postId={post.id} className="flex items-center pr-2 transition-colors duration-150 hover:bg-primary-soft/60">
@@ -37,9 +38,9 @@ export function PostRow({ post, thumbUrl }: { post: PostWithTargets; thumbUrl?: 
         </div>
         <ul className="hidden items-center gap-2 sm:flex" aria-label="Platforms">
           {post.targets.map((t) => (
-            <li key={t.id} className="relative" title={`${t.platform}: ${t.status}`}>
+            <li key={t.id} className="relative" title={`${PLATFORM_META[t.platform].label}: ${statusLabel(t.status)}`}>
               <span className="grid size-8 place-items-center rounded-lg border border-border bg-background">
-                <PlatformIcon platform={t.platform} title={`${t.platform} ${t.status}`} />
+                <PlatformIcon platform={t.platform} title={`${PLATFORM_META[t.platform].label}: ${statusLabel(t.status)}`} />
               </span>
               <span className={`absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-background ${DOT[t.status] ?? "bg-warning"}`} aria-hidden />
             </li>

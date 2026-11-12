@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { signToken, verifyToken } from "@/lib/crypto";
 import { CLEANUP_RULES, DAY_MS, isPurgeable, type MediaUsageAsset, type PostUsage } from "@/lib/media/cleanup";
 import { env } from "@/lib/env";
+import { UPLOAD_MAX_BYTES } from "@/lib/media/shrink-plan";
 import { readCapped, safeFetch } from "@/lib/net/safe-fetch";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
 import { SUPPORTED_MIME } from "@/lib/platforms/limits";
@@ -152,10 +153,13 @@ export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_
   const db = supabaseAdmin();
   const { error } = await db.storage.from(MEDIA_BUCKET).remove([asset.storage_path]);
   if (error) throw error;
-  await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
+  // The file is gone: if this write is lost, posts and Retry would still treat it as available.
+  const { error: markErr } = await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
+  if (markErr) throw markErr;
 }
 
-const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+// Storage takes at most UPLOAD_MAX_BYTES per file, so a bigger download would only fail at upload.
+const MAX_IMPORT_BYTES = UPLOAD_MAX_BYTES;
 
 /** Downloads a public URL into storage (for agents that have a link rather than a local file). */
 export async function importMediaFromUrl(userId: string, sourceUrl: string, maxBytes = MAX_IMPORT_BYTES): Promise<MediaAssetRow> {
@@ -175,32 +179,74 @@ export async function importMediaFromUrl(userId: string, sourceUrl: string, maxB
  * done. The media row and its thumbnail stay so the post history still renders. Returns how many.
  */
 export async function purgeFinishedMedia(): Promise<number> {
+  // Assets still in use are never marked purged, so page past them instead of re-reading the same oldest batch.
+  let purged = 0;
+  let after: string | null = null;
+  for (let page = 0; page < 20; page++) {
+    const batch = await purgeFinishedBatch(after);
+    purged += batch.purged;
+    if (!batch.last) break;
+    after = batch.last;
+  }
+  return purged;
+}
+
+// Small enough that the usage lookups stay well under PostgREST's 1,000-row cap per request.
+const PURGE_BATCH = 200;
+const ROW_CAP = 1000;
+
+async function purgeFinishedBatch(after: string | null): Promise<{ purged: number; last: string | null }> {
   const db = supabaseAdmin();
-  const { data: assets } = await db
+  let query = db
     .from("media_assets")
     .select("id, storage_path, status, created_at")
     .is("purged_at", null)
-    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString())
-    .order("created_at")
-    .limit(500);
-  if (!assets?.length) return 0;
-  const { data: links } = await db
-    .from("post_media")
-    .select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)")
-    .in("media_asset_id", assets.map((a) => a.id));
-  // Covers of posts made before post_media existed.
-  const { data: covers } = await db
-    .from("posts")
-    .select("status, published_at, updated_at, media_asset_id")
-    .in("media_asset_id", assets.map((a) => a.id));
+    .lt("created_at", new Date(Date.now() - CLEANUP_RULES.orphanAfterDays * DAY_MS).toISOString());
+  if (after) query = query.gt("created_at", after);
+  const { data: assets, error: assetsErr } = await query.order("created_at").limit(PURGE_BATCH);
+  if (assetsErr) throw assetsErr;
+  if (!assets?.length) return { purged: 0, last: null };
+  const ids = assets.map((a) => a.id as string);
+  // If any lookup fails we can't tell what's in use, so purge nothing this run rather than delete
+  // the file of a scheduled post (an empty answer would look like "unused").
+  const [
+    { data: links, error: linksErr },
+    { data: covers, error: coversErr },
+    { data: projectMedia, error: pmErr },
+    { data: icons, error: iconErr },
+  ] = await Promise.all([
+    db.from("post_media").select("media_asset_id, post:posts(status, published_at, updated_at, media_asset_id)").in("media_asset_id", ids),
+    // Covers of posts made before post_media existed.
+    db.from("posts").select("status, published_at, updated_at, media_asset_id").in("media_asset_id", ids),
+    // Project media (logo, screens, photos, icon) is kept for as long as the project uses it.
+    db.from("project_media").select("media_asset_id").in("media_asset_id", ids),
+    db.from("projects").select("icon_asset_id").in("icon_asset_id", ids),
+  ]);
+  if (linksErr || coversErr || pmErr || iconErr) throw linksErr ?? coversErr ?? pmErr ?? iconErr;
+  // A capped answer may be missing the one post that still needs a file: don't guess.
+  if ([links, covers, projectMedia, icons].some((rows) => (rows?.length ?? 0) >= ROW_CAP)) {
+    throw new Error("Media usage lookup hit the row cap; skipping cleanup for this batch");
+  }
+
   const usage = new Map<string, PostUsage[]>();
   const add = (id: string, p: PostUsage | null) => p && usage.set(id, [...(usage.get(id) ?? []), p]);
   for (const l of links ?? []) add(l.media_asset_id as string, l.post as unknown as PostUsage);
   for (const c of covers ?? []) add(c.media_asset_id as string, c as PostUsage);
+  const keep = new Set<string>([
+    ...(projectMedia ?? []).map((r) => r.media_asset_id as string),
+    ...(icons ?? []).map((r) => r.icon_asset_id as string),
+  ]);
 
-  const purgeable = assets.filter((a) => isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  const purgeable = assets.filter((a) => !keep.has(a.id as string) && isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  // Count only files really removed, so the cron's report isn't inflated by failures.
+  let purged = 0;
   for (const asset of purgeable) {
-    await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
+    try {
+      await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string });
+      purged++;
+    } catch (err) {
+      console.error("purge failed", asset.id, err);
+    }
   }
-  return purgeable.length;
+  return { purged, last: assets.length === PURGE_BATCH ? (assets[assets.length - 1].created_at as string) : null };
 }

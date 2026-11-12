@@ -5,6 +5,7 @@ import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, CheckCircle2, ChevronLe
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { PlatformBadge, PlatformIcon, PLATFORM_META } from "@/components/app/platform";
+import { useUnsavedGuard } from "@/components/app/unsaved-guard";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
@@ -156,6 +157,14 @@ function MediaRow({
 }) {
   const { file, meta, state, previewUrl } = item;
   const isImage = file.type.startsWith("image/");
+  // Read out when the upload's state changes, not on every percent of progress.
+  const announcement = state.status === "error" ? `${file.name} didn't upload: ${state.error}` : {
+    idle: "",
+    uploading: `Uploading ${file.name}`,
+    done: `${file.name} uploaded`,
+    "too-big": `${file.name} is too big`,
+    shrinking: `Shrinking ${file.name}`,
+  }[state.status];
   return (
     <li className="flex items-center gap-4 rounded-2xl border border-border bg-surface p-3 sm:p-4">
       <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-background text-muted-foreground shadow-sm">
@@ -180,7 +189,8 @@ function MediaRow({
           {meta.durationS ? ` · ${formatDuration(meta.durationS)}` : ""}
           {landscape && " · landscape"}
         </p>
-        <div className="mt-2" aria-live="polite">
+        <p className="sr-only" role="status">{announcement}</p>
+        <div className="mt-2">
           {state.status === "uploading" && (
             <div className="flex items-center gap-3">
               <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={Math.round(state.progress * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`Upload progress for ${file.name}`}>
@@ -227,10 +237,10 @@ function MediaRow({
       </div>
       {position && (
         <div className="flex shrink-0 flex-col">
-          <button type="button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`Move photo ${position} earlier`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+          <button type="button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`Move photo ${position} earlier`} className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
             <ArrowUp className="size-4" aria-hidden />
           </button>
-          <button type="button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`Move photo ${position} later`} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
+          <button type="button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`Move photo ${position} later`} className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30">
             <ArrowDown className="size-4" aria-hidden />
           </button>
         </div>
@@ -319,19 +329,34 @@ export function Composer({
     });
   }
   const platforms = [...new Set(selectedAccounts.map((a) => a.platform))];
+  // Per-platform captions only apply while tabs are shown (2+ platforms); with one platform the box is the caption.
+  const multi = platforms.length > 1;
+  const activeOverrides: Partial<Record<Platform, string>> = multi ? overrides : {};
+  const activeTab: "all" | Platform = multi && captionTab !== "all" && platforms.includes(captionTab) ? captionTab : "all";
   const tiktokAccounts = selectedAccounts.filter((a) => a.platform === "tiktok");
 
   // TikTok requires showing live creator info before posting. Fetch once per account, not once per render.
   const creatorInfoRequested = useRef(new Set<string>());
+  const [creatorInfoAttempt, setCreatorInfoAttempt] = useState(0);
   useEffect(() => {
     for (const a of tiktokAccounts) {
       if (creatorInfoRequested.current.has(a.id)) continue;
       creatorInfoRequested.current.add(a.id);
-      tiktokCreatorInfoAction(a.id).then((res) =>
-        setCreatorInfo((prev) => ({ ...prev, [a.id]: res.ok ? res.data : { error: res.error } })),
-      );
+      tiktokCreatorInfoAction(a.id)
+        .then((res) => setCreatorInfo((prev) => ({ ...prev, [a.id]: res.ok ? res.data : { error: res.error } })))
+        // A network failure would otherwise leave "Loading TikTok account settings…" up forever.
+        .catch(() => setCreatorInfo((prev) => ({ ...prev, [a.id]: { error: "Couldn't load your TikTok settings." } })));
     }
-  }, [tiktokAccounts]);
+  }, [tiktokAccounts, creatorInfoAttempt]);
+  const tiktokInfoFailed = tiktokAccounts.filter((a) => {
+    const info = creatorInfo[a.id];
+    return !!info && "error" in info;
+  });
+  function retryCreatorInfo() {
+    for (const a of tiktokInfoFailed) creatorInfoRequested.current.delete(a.id);
+    setCreatorInfo((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !tiktokInfoFailed.some((a) => a.id === id))));
+    setCreatorInfoAttempt((n) => n + 1);
+  }
 
   const tiktokInfos = tiktokAccounts.map((a) => creatorInfo[a.id]).filter((i): i is TikTokCreatorInfo => !!i && !("error" in i));
   const tiktokPrivacyOptions = tiktokInfos.length
@@ -353,13 +378,19 @@ export function Composer({
     return () => observer.disconnect();
   }, []);
 
-  // Warn before leaving with unsaved work.
+  // A file dropped beside the drop zone would make the browser open it and leave the page.
   useEffect(() => {
-    if (!items.length || submitted) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [items.length, submitted]);
+    const block = (e: DragEvent) => e.dataTransfer?.types.includes("Files") && e.preventDefault();
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, []);
+
+  // Warn before leaving (or switching project) with unsaved work.
+  useUnsavedGuard(items.length > 0 && !submitted, "Leave this page? Your upload and caption haven't been posted and will be lost.");
 
   /** A post is one video, or 1–35 photos (a carousel when there's more than one). */
   async function pickFiles(list: FileList | null | undefined) {
@@ -422,12 +453,12 @@ export function Composer({
 
   const optionsFor = (platform: Platform): TargetOptions =>
     platform === "youtube"
-      ? { platform, youtube: { ...yt, description: overrides.youtube ?? caption } }
+      ? { platform, youtube: { ...yt, description: activeOverrides.youtube ?? caption } }
       : platform === "instagram"
         ? { platform, instagram: ig }
         : { platform, tiktok: { ...tt, brandOrganic: commercial && tt.brandOrganic, brandedContent: commercial && tt.brandedContent } };
 
-  const captionFor = (platform: Platform) => overrides[platform] ?? caption;
+  const captionFor = (platform: Platform) => activeOverrides[platform] ?? caption;
 
   const issues: ValidationIssue[] = mediaInfos.length
     ? platforms.flatMap((p) => validateMedia(mediaInfos, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
@@ -448,7 +479,8 @@ export function Composer({
     if (info && "error" in info) blockers.push({ message: `TikTok: ${info.error}`, target: SECTION.settings });
   }
 
-  const canSubmit = uploaded && blockers.length === 0 && !submitting;
+  // `submitted` keeps it off while the post page loads, so a second click can't post twice.
+  const canSubmit = uploaded && blockers.length === 0 && !submitting && !submitted;
   // Why Publish is off before there's anything to check.
   const waitReason = !items.length
     ? "Add a video or photos to get started."
@@ -475,7 +507,7 @@ export function Composer({
       scheduledFor: when === "later" ? new Date(scheduleAt).toISOString() : null,
       targets: selectedAccounts.map((a) => ({
         accountId: a.id,
-        captionOverride: overrides[a.platform] ?? null,
+        captionOverride: activeOverrides[a.platform] ?? null,
         options: optionsFor(a.platform),
       })),
     };
@@ -494,16 +526,16 @@ export function Composer({
 
   const issuesFor = (platform: Platform, field?: ValidationIssue["field"]) =>
     issues.filter((i) => i.platform === platform && (!field || i.field === field));
-  const activeCaption = captionTab === "all" ? caption : overrides[captionTab] ?? caption;
-  const captionMax = captionTab === "all" ? Math.min(...(platforms.length ? platforms.map((p) => CAPTION_MAX[p]) : [2200])) : CAPTION_MAX[captionTab];
+  const activeCaption = activeTab === "all" ? caption : activeOverrides[activeTab] ?? caption;
+  const captionMax = activeTab === "all" ? Math.min(...(platforms.length ? platforms.map((p) => CAPTION_MAX[p]) : [2200])) : CAPTION_MAX[activeTab];
   const vertical = mediaInfo ? isVertical(mediaInfo) : true;
   const shownIndex = Math.min(previewIndex, Math.max(items.length - 1, 0));
   const shown = items[shownIndex] ?? null;
-  const previewCaption = captionFor(captionTab === "all" ? platforms[0] ?? "instagram" : captionTab);
+  const previewCaption = captionFor(activeTab === "all" ? platforms[0] ?? "instagram" : activeTab);
   const captionTabs = ["all", ...platforms] as const;
 
   function onTabKey(e: React.KeyboardEvent) {
-    const at = captionTabs.indexOf(captionTab);
+    const at = captionTabs.indexOf(activeTab);
     const next = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: captionTabs.length - 1 }[e.key];
     if (next === undefined) return;
     e.preventDefault();
@@ -524,6 +556,8 @@ export function Composer({
             accept={ACCEPT}
             multiple
             className="sr-only"
+            // The visible "Choose files" button opens it; don't make keyboard users Tab through an invisible control first.
+            tabIndex={-1}
             aria-label="Choose a video or photos"
             onChange={(e) => pickFiles(e.target.files)}
           />
@@ -533,7 +567,8 @@ export function Composer({
                 e.preventDefault();
                 setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              // Moving over the text inside fires dragleave too; only reset when leaving the zone itself.
+              onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDragging(false)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragging(false);
@@ -554,7 +589,15 @@ export function Composer({
               </Button>
             </div>
           ) : (
-            <div className="space-y-2">
+            // Dropping more photos onto the list adds them; anything that doesn't fit gets the same message as the picker.
+            <div
+              className="space-y-2"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                pickFiles(e.dataTransfer.files);
+              }}
+            >
               <ol className="space-y-2" aria-label={isCarousel ? "Carousel photos in order" : "Media"}>
                 {items.map((item, index) => (
                   <MediaRow
@@ -640,16 +683,16 @@ export function Composer({
                   id={`${ids}-tab-${tab}`}
                   role="tab"
                   type="button"
-                  aria-selected={captionTab === tab}
+                  aria-selected={activeTab === tab}
                   aria-controls={`${ids}-caption-panel`}
-                  tabIndex={captionTab === tab ? 0 : -1}
+                  tabIndex={activeTab === tab ? 0 : -1}
                   onClick={() => setCaptionTab(tab)}
                   className={cn(
                     "flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
-                    captionTab === tab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    activeTab === tab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{overrides[tab] !== undefined && <><span className="size-1.5 rounded-full bg-primary" aria-hidden /><span className="sr-only">(customized)</span></>}</>}
+                  {tab === "all" ? "All platforms" : <><PlatformIcon platform={tab} />{PLATFORM_META[tab].label}{activeOverrides[tab] !== undefined && <><span className="size-1.5 rounded-full bg-primary" aria-hidden /><span className="sr-only">(customized)</span></>}</>}
                 </button>
               ))}
             </div>
@@ -657,14 +700,14 @@ export function Composer({
           <div
             id={`${ids}-caption-panel`}
             role={platforms.length > 1 ? "tabpanel" : undefined}
-            aria-labelledby={platforms.length > 1 ? `${ids}-tab-${captionTab}` : undefined}
+            aria-labelledby={platforms.length > 1 ? `${ids}-tab-${activeTab}` : undefined}
           >
           <Field
             id={`${ids}-caption`}
-            label={captionTab === "all" ? "Caption" : `${PLATFORM_META[captionTab].label} caption`}
+            label={activeTab === "all" ? "Caption" : `${PLATFORM_META[activeTab].label} caption`}
             counter={{ value: activeCaption.length, max: captionMax }}
-            hint={captionTab === "all" ? "Hashtags and @mentions are fine. Instagram allows up to 30 hashtags." : "Only used on this platform."}
-            error={issues.find((i) => i.field === "caption" && (captionTab === "all" || i.platform === captionTab))?.message}
+            hint={activeTab === "all" ? "Hashtags and @mentions are fine. Instagram allows up to 30 hashtags." : "Only used on this platform."}
+            error={issues.find((i) => i.field === "caption" && (activeTab === "all" || i.platform === activeTab))?.message}
           >
             <Textarea
               id={`${ids}-caption`}
@@ -672,10 +715,10 @@ export function Composer({
               value={activeCaption}
               aria-invalid={activeCaption.length > captionMax || undefined}
               placeholder="What's this one about?"
-              onChange={(e) => (captionTab === "all" ? setCaption(e.target.value) : setOverrides((o) => ({ ...o, [captionTab]: e.target.value })))}
+              onChange={(e) => (activeTab === "all" ? setCaption(e.target.value) : setOverrides((o) => ({ ...o, [activeTab]: e.target.value })))}
             />
           </Field>
-          {captionTab !== "all" && overrides[captionTab] !== undefined && (
+          {activeTab !== "all" && activeOverrides[activeTab] !== undefined && (
             <Button
               variant="ghost"
               size="sm"
@@ -683,7 +726,7 @@ export function Composer({
               onClick={() =>
                 setOverrides((o) => {
                   const next = { ...o };
-                  delete next[captionTab];
+                  delete next[activeTab];
                   return next;
                 })
               }
@@ -709,7 +752,7 @@ export function Composer({
                     error={issuesFor("youtube", "title")[0]?.message}
                     hint={vertical && (meta?.durationS ?? 0) <= LIMITS.youtube.shortsMaxDurationS ? "This will appear as a YouTube Short (vertical, 3 min or less)." : undefined}
                   >
-                    <Input id={`${ids}-yt-title`} value={yt.title} maxLength={120} onChange={(e) => setYt({ ...yt, title: e.target.value })} aria-invalid={!!issuesFor("youtube", "title").length || undefined} />
+                    <Input id={`${ids}-yt-title`} value={yt.title} maxLength={LIMITS.youtube.titleMax} onChange={(e) => setYt({ ...yt, title: e.target.value })} aria-invalid={!!issuesFor("youtube", "title").length || undefined} />
                   </Field>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field id={`${ids}-yt-privacy`} label="Visibility">
@@ -775,6 +818,12 @@ export function Composer({
               {platforms.includes("tiktok") && (
                 <div className="space-y-4">
                   <h3 className="flex items-center gap-2 font-semibold"><PlatformIcon platform="tiktok" />TikTok</h3>
+                  {tiktokInfoFailed.length > 0 && (
+                    <Notice tone="error" className="flex flex-wrap items-center justify-between gap-3">
+                      <span>Couldn&apos;t load TikTok account settings, which TikTok requires before posting.</span>
+                      <Button type="button" size="sm" variant="secondary" onClick={retryCreatorInfo}>Retry</Button>
+                    </Notice>
+                  )}
                   {tiktokInfos.length > 0 && (
                     <p className="text-sm text-muted-foreground">
                       Posting as <span className="font-semibold text-foreground">{tiktokInfos.map((i) => i.creatorNickname || `@${i.creatorUsername}`).join(", ")}</span>
@@ -857,7 +906,7 @@ export function Composer({
                     aria-label={label}
                     disabled={shownIndex + step < 0 || shownIndex + step >= items.length}
                     onClick={() => setPreviewIndex(shownIndex + step)}
-                    className={cn("absolute top-1/2 z-10 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-black/50 text-white transition-opacity hover:bg-black/70 disabled:opacity-0", side)}
+                    className={cn("absolute top-1/2 z-10 grid size-9 -translate-y-1/2 place-items-center rounded-full bg-black/50 after:absolute after:-inset-1 after:content-[''] text-white transition-opacity hover:bg-black/70 disabled:opacity-0", side)}
                   >
                     <Icon className="size-5" aria-hidden />
                   </button>
@@ -920,7 +969,7 @@ export function Composer({
             )}
             {submitError && <Notice tone="error" className="whitespace-pre-line">{submitError}</Notice>}
 
-            <Button className="w-full" disabled={!canSubmit} loading={submitting} onClick={submit}>
+            <Button className="w-full" disabled={!canSubmit} loading={submitting || submitted} onClick={submit}>
               {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
               {when === "now" ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}` : "Schedule post"}
             </Button>
@@ -948,7 +997,7 @@ export function Composer({
             <span className="font-semibold text-success">Ready to {when === "now" ? "publish" : "schedule"}</span>
           )}
         </p>
-        <Button size="sm" disabled={!canSubmit} loading={submitting} onClick={submit} tabIndex={publishVisible ? -1 : undefined}>
+        <Button size="sm" disabled={!canSubmit} loading={submitting || submitted} onClick={submit} tabIndex={publishVisible ? -1 : undefined}>
           {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
           {when === "now" ? "Publish" : "Schedule"}
         </Button>

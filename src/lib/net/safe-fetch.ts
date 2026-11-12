@@ -30,16 +30,42 @@ function isPrivateV4([a, b]: number[]): boolean {
   );
 }
 
+/** The eight 16-bit groups of an IPv6 address (handles "::" and a dotted IPv4 tail), or null. */
+function ipv6Groups(addr: string): number[] | null {
+  let text = addr.split("%")[0];
+  const tail = text.match(/(\d+\.\d+\.\d+\.\d+)$/);
+  if (tail) {
+    const v4 = ipv4Parts(tail[1]);
+    if (!v4) return null;
+    text = text.slice(0, -tail[1].length) + `${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part ? part.split(":").map((h) => (/^[0-9a-f]{1,4}$/.test(h) ? parseInt(h, 16) : NaN)) : []);
+  const head = parse(halves[0]);
+  const rest = halves.length === 2 ? parse(halves[1]) : [];
+  const fill = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  if (fill < 0) return null;
+  const groups = [...head, ...Array(fill).fill(0), ...rest];
+  return groups.length === 8 && groups.every((n) => Number.isInteger(n)) ? groups : null;
+}
+
 /** True for loopback, private, link-local, CGNAT, multicast and other non-public addresses. */
 export function isPrivateAddress(ip: string): boolean {
   const addr = ip.replace(/^\[|\]$/g, "").toLowerCase();
   const v4 = ipv4Parts(addr);
   if (v4) return isPrivateV4(v4);
   if (isIP(addr) !== 6) return true;
-  if (addr === "::" || addr === "::1") return true;
-  const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateAddress(mapped[1]);
-  const first = parseInt(addr.split(":")[0] || "0", 16);
+  const g = ipv6Groups(addr);
+  if (!g) return true;
+  if (g.every((x) => x === 0) || (g.slice(0, 7).every((x) => x === 0) && g[7] === 1)) return true; // :: and ::1
+  // Addresses that carry an IPv4 address inside: mapped/compatible (::ffff:a.b.c.d, ::a.b.c.d,
+  // which URL parsing rewrites to hex like ::ffff:7f00:1), NAT64 (64:ff9b::/96) and 6to4 (2002::/16).
+  const v4From = (hi: number, lo: number) => [hi >> 8, hi & 255, lo >> 8, lo & 255];
+  if (g.slice(0, 5).every((x) => x === 0) && (g[5] === 0 || g[5] === 0xffff)) return isPrivateV4(v4From(g[6], g[7]));
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isPrivateV4(v4From(g[6], g[7]));
+  if (g[0] === 0x2002) return isPrivateV4(v4From(g[1], g[2]));
+  const first = g[0];
   return (
     (first & 0xfe00) === 0xfc00 || // fc00::/7 unique local
     (first & 0xffc0) === 0xfe80 || // fe80::/10 link-local
