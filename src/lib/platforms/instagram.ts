@@ -68,7 +68,9 @@ export const instagram: PlatformAdapter = {
   async refresh(_account, _refreshToken, accessToken) {
     const res = await fetch(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: "ig_refresh_token", access_token: accessToken })}`);
     if (res.status === 400 || res.status === 401) {
-      throw new PlatformError("Instagram token expired", { retryable: false, reauth: true });
+      // Rate limits and hiccups come back as 400 too: retry those instead of asking the user to reconnect.
+      const body = (await res.clone().json().catch(() => null)) as { error?: GraphError } | null;
+      if (!isTransient(body?.error)) throw new PlatformError("Instagram token expired", { retryable: false, reauth: true });
     }
     const json = await igJson(res, "Instagram token refresh");
     return { accessToken: json.access_token, refreshToken: null, expiresIn: json.expires_in };

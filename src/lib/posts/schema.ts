@@ -65,6 +65,11 @@ export const createPostSchema = z
   .refine((v) => !!v.mediaAssetId !== !!v.mediaAssetIds?.length, {
     message: "Give either mediaAssetId or mediaAssetIds",
     path: ["mediaAssetIds"],
+  })
+  // Each target is its own publish run: listing an account twice would post the same thing to it twice.
+  .refine((v) => new Set(v.targets.map((t) => t.accountId)).size === v.targets.length, {
+    message: "Each account can only be listed once",
+    path: ["targets"],
   });
 
 export type CreatePostInput = z.input<typeof createPostSchema>;

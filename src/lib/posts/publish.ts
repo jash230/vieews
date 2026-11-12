@@ -59,24 +59,27 @@ export async function failStaleTargets(postId?: string): Promise<number> {
     .in("status", [...IN_FLIGHT])
     .lt("started_at", new Date(Date.now() - STALE_AFTER_MS).toISOString());
   if (postId) q = q.eq("post_id", postId);
-  const { data } = await q.select("post_id");
+  // An error must surface (the cron reports it), not read as "nothing was stale".
+  const { data, error } = await q.select("post_id");
+  if (error) throw new Error(error.message);
   for (const id of new Set((data ?? []).map((t) => t.post_id as string))) await refreshPostStatus(id);
   return data?.length ?? 0;
 }
 
 /** Fails every target of the post that never started, e.g. when its workflow gave up. */
 export async function failPendingTargets(postId: string, message: string) {
-  await supabaseAdmin()
+  const { error } = await supabaseAdmin()
     .from("post_targets")
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("post_id", postId)
     .eq("status", "pending");
+  if (error) throw new Error(error.message);
   await refreshPostStatus(postId);
 }
 
 /** Posts the daily cron should restart: overdue scheduled ones and stalled publishing ones. */
 export async function findStalledPosts(): Promise<string[]> {
-  const { data } = await supabaseAdmin()
+  const { data, error } = await supabaseAdmin()
     .from("posts")
     .select("id, status, scheduled_for, updated_at, targets:post_targets(status)")
     .in("status", ["scheduled", "publishing"])
@@ -85,6 +88,7 @@ export async function findStalledPosts(): Promise<string[]> {
     .lt("updated_at", new Date(Date.now() - HEAL_AFTER_MS).toISOString())
     .order("updated_at")
     .limit(100);
+  if (error) throw new Error(error.message);
   const posts = (data ?? []) as unknown as (Parameters<typeof needsRestart>[0] & { id: string })[];
   return posts.filter((p) => needsRestart(p)).map((p) => p.id);
 }
@@ -137,12 +141,16 @@ export interface StepRunner {
 
 export async function failTarget(targetId: string, message: string) {
   const db = supabaseAdmin();
-  const { data } = await db
+  // Never over a finished target: a late failure report must not turn a live post into a "failed"
+  // one whose Retry would post it a second time.
+  const { data, error } = await db
     .from("post_targets")
     .update({ status: "failed", error: message.slice(0, 2000), finished_at: new Date().toISOString() })
     .eq("id", targetId)
+    .in("status", ["pending", ...IN_FLIGHT])
     .select("post_id")
     .maybeSingle();
+  if (error) throw new Error(error.message);
   if (data) await refreshPostStatus(data.post_id);
 }
 
@@ -152,13 +160,15 @@ export async function claimTarget(targetId: string): Promise<boolean> {
   const { data: target, error: readErr } = await db.from("post_targets").select("status, attempts").eq("id", targetId).maybeSingle();
   if (readErr) throw new Error(readErr.message);
   if (!target || target.status !== "pending") return false;
-  const { data } = await db
+  const { data, error } = await db
     .from("post_targets")
     .update({ status: "uploading", attempts: target.attempts + 1, started_at: new Date().toISOString(), error: null })
     .eq("id", targetId)
     .eq("status", "pending")
     .eq("attempts", target.attempts)
     .select("id");
+  // A failed write must retry the step, not read as "someone else claimed it" and leave it pending.
+  if (error) throw new Error(error.message);
   return !!data?.length;
 }
 

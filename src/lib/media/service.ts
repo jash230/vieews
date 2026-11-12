@@ -153,7 +153,9 @@ export async function purgeMediaFile(asset: Pick<MediaAssetRow, "id" | "storage_
   const db = supabaseAdmin();
   const { error } = await db.storage.from(MEDIA_BUCKET).remove([asset.storage_path]);
   if (error) throw error;
-  await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
+  // The file is gone: if this write is lost, posts and Retry would still treat it as available.
+  const { error: markErr } = await db.from("media_assets").update({ purged_at: new Date().toISOString() }).eq("id", asset.id);
+  if (markErr) throw markErr;
 }
 
 // Storage takes at most UPLOAD_MAX_BYTES per file, so a bigger download would only fail at upload.
@@ -236,8 +238,15 @@ async function purgeFinishedBatch(after: string | null): Promise<{ purged: numbe
   ]);
 
   const purgeable = assets.filter((a) => !keep.has(a.id as string) && isPurgeable(a as MediaUsageAsset, usage.get(a.id) ?? [], new Date()));
+  // Count only files really removed, so the cron's report isn't inflated by failures.
+  let purged = 0;
   for (const asset of purgeable) {
-    await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string }).catch((err) => console.error(err));
+    try {
+      await purgeMediaFile({ id: asset.id as string, storage_path: asset.storage_path as string });
+      purged++;
+    } catch (err) {
+      console.error("purge failed", asset.id, err);
+    }
   }
-  return { purged: purgeable.length, last: assets.length === PURGE_BATCH ? (assets[assets.length - 1].created_at as string) : null };
+  return { purged, last: assets.length === PURGE_BATCH ? (assets[assets.length - 1].created_at as string) : null };
 }

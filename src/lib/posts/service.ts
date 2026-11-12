@@ -239,10 +239,25 @@ export async function retryTarget(userId: string, targetId: string) {
   if (target.status !== "failed") throw new Error("Only failed targets can be retried");
   const post = await getPost(userId, target.post_id);
   if (post.items.some((m) => m.purged_at)) throw new Error("This post's media was cleaned up to free storage. Create a new post instead.");
-  await db.from("post_targets").update({ status: "pending", error: null, finished_at: null }).eq("id", targetId);
+  // Only from "failed": a second Retry (double click, or the UI and an agent at once) must not put a
+  // target the first retry already claimed back to pending, where a second run would post it again.
+  const { data: reset, error: resetErr } = await db
+    .from("post_targets")
+    .update({ status: "pending", error: null, finished_at: null })
+    .eq("user_id", userId)
+    .eq("id", targetId)
+    .eq("status", "failed")
+    .select("id");
+  if (resetErr) throw resetErr;
+  if (!reset?.length) throw new Error("This platform is already being retried.");
   // A scheduled post whose workflow failed to start: retrying puts it back on schedule, not out right now.
   const stillScheduled = !!post.scheduled_for && new Date(post.scheduled_for).getTime() > Date.now();
-  await db.from("posts").update({ status: stillScheduled ? "scheduled" : "publishing" }).eq("id", target.post_id);
+  const { error: postErr } = await db.from("posts").update({ status: stillScheduled ? "scheduled" : "publishing" }).eq("id", target.post_id);
+  if (postErr) {
+    const { failTarget } = await import("./publish");
+    await failTarget(targetId, START_FAILED);
+    throw new Error(START_FAILED);
+  }
   try {
     if (stillScheduled) await startPublishPost(target.post_id);
     else await startRetryTarget(targetId);
@@ -264,15 +279,30 @@ export function rollupStatus(statuses: PostTargetRow["status"][]): PostStatus {
   return "partial";
 }
 
+/**
+ * When a post went out: the last of its targets to publish. Derived from the targets rather than
+ * "now", so re-deriving the status later (a stale upload failing, a retry) doesn't move it.
+ */
+export function publishedAtOf(targets: Pick<PostTargetRow, "status" | "finished_at">[]): string | null {
+  let latest: string | null = null;
+  for (const t of targets) {
+    if (t.status !== "published" || !t.finished_at) continue;
+    if (!latest || new Date(t.finished_at).getTime() > new Date(latest).getTime()) latest = t.finished_at;
+  }
+  return latest;
+}
+
 export async function refreshPostStatus(postId: string): Promise<PostStatus> {
   const db = supabaseAdmin();
-  const { data, error } = await db.from("post_targets").select("status").eq("post_id", postId);
+  const { data, error } = await db.from("post_targets").select("status, finished_at").eq("post_id", postId);
   // Rolling up an empty answer would read as "canceled".
   if (error) throw new Error(error.message);
-  const status = rollupStatus((data ?? []).map((t) => t.status));
+  const targets = (data ?? []) as Pick<PostTargetRow, "status" | "finished_at">[];
+  const status = rollupStatus(targets.map((t) => t.status));
+  const wentOut = status === "published" || status === "partial";
   let update = db
     .from("posts")
-    .update({ status, published_at: status === "published" || status === "partial" ? new Date().toISOString() : null })
+    .update({ status, published_at: wentOut ? (publishedAtOf(targets) ?? new Date().toISOString()) : null })
     .eq("id", postId)
     .neq("status", "canceled");
   // Pending targets of a post that hasn't gone out yet are just waiting: it stays scheduled

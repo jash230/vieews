@@ -81,6 +81,19 @@ describe("YouTube", () => {
 });
 
 describe("Instagram", () => {
+  it("retries a rate-limited token refresh instead of asking to reconnect", async () => {
+    mockFetch([[/refresh_access_token/, () => json({ error: { message: "Application request limit reached", code: 4 } }, { status: 400 })]]);
+    const err = await instagram.refresh({} as never, null, "tok").catch((e) => e);
+    expect(err.opts).toMatchObject({ retryable: true });
+    expect(err.opts.reauth).toBeFalsy();
+  });
+
+  it("asks to reconnect when the refresh token is really dead", async () => {
+    mockFetch([[/refresh_access_token/, () => json({ error: { message: "Session has expired", code: 190 } }, { status: 400 })]]);
+    const err = await instagram.refresh({} as never, null, "tok").catch((e) => e);
+    expect(err.opts).toMatchObject({ retryable: false, reauth: true });
+  });
+
   it("creates a reel container, waits for processing, then publishes", async () => {
     let checks = 0;
     const calls = mockFetch([
