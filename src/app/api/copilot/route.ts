@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { runTurn } from "@/lib/copilot/run";
 import { getProject, ProjectNotFoundError } from "@/lib/projects/service";
+import { aiBudgetSpent } from "@/lib/usage/service";
 
 export const maxDuration = 300;
 
@@ -26,6 +27,9 @@ export async function POST(req: Request) {
   } catch (err) {
     if (err instanceof ProjectNotFoundError) return Response.json({ error: "Project not found" }, { status: 404 });
     throw err;
+  }
+  if (await aiBudgetSpent(userId)) {
+    return Response.json({ error: "You've reached today's copilot limit. It resets within 24 hours." }, { status: 429 });
   }
   const timeZone = isValidTimeZone(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";
 

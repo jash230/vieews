@@ -37,6 +37,15 @@ export function recordClaudeUsage(userId: string, projectId: string | null, mode
   return recordUsage({ userId, projectId, kind: "llm", provider: "anthropic", model, units, costUsd: costOf(model, usage), ref });
 }
 
+/** Most one account may spend on AI in any 24 hours. Haiku turns cost well under a cent, so this is hundreds of messages. */
+export const DAILY_AI_BUDGET_USD = 0.5;
+
+/** True once the account has used up its AI budget for the last 24 hours. */
+export async function aiBudgetSpent(userId: string, now = new Date()): Promise<boolean> {
+  const { totalUsd } = await usageSummary(userId, new Date(now.getTime() - 24 * 60 * 60_000));
+  return totalUsd >= DAILY_AI_BUDGET_USD;
+}
+
 export interface UsageSummary {
   totalUsd: number;
   byKind: Partial<Record<UsageKind, number>>;

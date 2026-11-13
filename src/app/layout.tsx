@@ -1,4 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata, Viewport } from "next";
 import { Fredoka, Nunito } from "next/font/google";
 import { Toaster } from "@/components/ui/toast";
@@ -17,7 +19,7 @@ const fredoka = Fredoka({
   display: "swap",
 });
 
-const DESCRIPTION = "Your app's social marketing on autopilot: Vieews makes, schedules and publishes posts to YouTube, Instagram and TikTok while you check in.";
+const DESCRIPTION = "Upload a video once and publish it to YouTube Shorts, Instagram Reels and TikTok, now or on a schedule.";
 
 // Link previews (opengraph-image.png next to this file) need absolute URLs, so they resolve against the public app URL.
 export const metadata: Metadata = {
@@ -46,6 +48,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <body className="min-h-dvh bg-background text-foreground">
           {children}
           <Toaster />
+          <Analytics />
+          <SpeedInsights />
         </body>
       </html>
     </ClerkProvider>
