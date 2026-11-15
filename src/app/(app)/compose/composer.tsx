@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { PlatformBadge, PlatformIcon, PLATFORM_META } from "@/components/app/platform";
 import { useUnsavedGuard } from "@/components/app/unsaved-guard";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Switch, Textarea } from "@/components/ui/form";
 import { Notice } from "@/components/ui/misc";
@@ -252,36 +252,73 @@ function MediaRow({
   );
 }
 
+export interface InitialClip {
+  assetId: string;
+  videoUrl: string;
+  width: number | null;
+  height: number | null;
+  durationS: number | null;
+  sizeBytes: number;
+  title: string;
+  caption: string;
+}
+
+/** An upload item for media that's already in storage: shown and posted like a finished upload. */
+function clipUploadItem(clip: InitialClip): UploadItem {
+  // Nothing reads the bytes of a finished upload, only its name, type and size.
+  const file = new File([], "clip.mp4", { type: "video/mp4" });
+  Object.defineProperty(file, "size", { value: clip.sizeBytes });
+  return {
+    key: `clip-${clip.assetId}`,
+    file,
+    previewUrl: clip.videoUrl,
+    meta: { width: clip.width, height: clip.height, durationS: clip.durationS, thumbnail: null },
+    state: { status: "done", assetId: clip.assetId },
+  };
+}
+
 export function Composer({
   accounts,
   unassigned,
   projectId,
   initialAt,
+  initialClips = [],
 }: {
   accounts: PublicAccount[];
   /** Connected accounts that post for no project yet; offered with an Add button. */
   unassigned: PublicAccount[];
   projectId: string;
   initialAt?: string;
+  /**
+   * Rendered clips to start from (the Clips page): already uploaded, with suggested captions.
+   * Two or more is a batch: each clip becomes its own post with its own caption and title.
+   */
+  initialClips?: InitialClip[];
 }) {
   const router = useRouter();
   const ids = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const { items, add: addUploads, remove: removeUpload, moveUp, retry: retryUpload, shrink: shrinkUpload } = useMediaUploads();
+  const { items, add: addUploads, remove: removeUpload, moveUp, retry: retryUpload, shrink: shrinkUpload } = useMediaUploads(initialClips.map(clipUploadItem));
+  const batch = initialClips.length > 1;
+  const initialClip = batch ? undefined : initialClips[0];
+  const clipOf = (item: UploadItem | null) => {
+    const s = item?.state;
+    return s?.status === "done" ? initialClips.find((c) => c.assetId === s.assetId) : undefined;
+  };
   const cover = items[0] ?? null;
-  const isCarousel = items.length > 1;
+  const isCarousel = items.length > 1 && !batch;
   const isPhotos = !!cover && cover.file.type.startsWith("image/");
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set(accounts.map((a) => a.id)));
   const [addingId, setAddingId] = useState<string | null>(null);
   const [adding, startAdding] = useTransition();
-  const [caption, setCaption] = useState("");
+  const [caption, setCaption] = useState(initialClip?.caption ?? "");
   const [captionTab, setCaptionTab] = useState<"all" | Platform>("all");
   const [overrides, setOverrides] = useState<Partial<Record<Platform, string>>>({});
 
-  const [yt, setYt] = useState<YouTubeOptions>({ title: "", privacy: "public", tags: [] });
+  const [yt, setYt] = useState<YouTubeOptions>({ title: initialClip?.title.slice(0, 100) ?? "", privacy: "public", tags: [] });
   const [ig, setIg] = useState<InstagramOptions>({ format: "reel", shareToFeed: true });
   const [tt, setTt] = useState<TikTokOptions>({
     privacyLevel: "",
@@ -311,6 +348,7 @@ export function Composer({
   const publishCard = useRef<HTMLElement>(null);
   const [publishVisible, setPublishVisible] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [needsPlan, setNeedsPlan] = useState(false);
   const [submitting, startSubmit] = useTransition();
   const [submitted, setSubmitted] = useState(false);
 
@@ -451,18 +489,24 @@ export function Composer({
   const uploading = items.some((i) => i.state.status === "uploading" || i.state.status === "shrinking");
   const tooBig = items.some((i) => i.state.status === "too-big");
 
-  const optionsFor = (platform: Platform): TargetOptions =>
+  // A batch clip brings its own caption and YouTube title; the settings chosen here apply to all of them.
+  const captionFor = (platform: Platform, clip?: InitialClip) => clip?.caption ?? activeOverrides[platform] ?? caption;
+
+  const optionsFor = (platform: Platform, clip?: InitialClip): TargetOptions =>
     platform === "youtube"
-      ? { platform, youtube: { ...yt, description: activeOverrides.youtube ?? caption } }
+      ? { platform, youtube: { ...yt, ...(clip && { title: clip.title.slice(0, LIMITS.youtube.titleMax) }), description: captionFor("youtube", clip) } }
       : platform === "instagram"
         ? { platform, instagram: ig }
         : { platform, tiktok: { ...tt, brandOrganic: commercial && tt.brandOrganic, brandedContent: commercial && tt.brandedContent } };
 
-  const captionFor = (platform: Platform) => activeOverrides[platform] ?? caption;
-
-  const issues: ValidationIssue[] = mediaInfos.length
-    ? platforms.flatMap((p) => validateMedia(mediaInfos, captionFor(p), optionsFor(p), { tiktokMaxDurationS: tiktokMaxDuration }))
-    : [];
+  const validate = (infos: MediaInfo[], clip?: InitialClip) =>
+    platforms.flatMap((p) => validateMedia(infos, captionFor(p, clip), optionsFor(p, clip), { tiktokMaxDurationS: tiktokMaxDuration }));
+  const issues: ValidationIssue[] = !mediaInfos.length
+    ? []
+    : batch
+      ? // Clips often share an issue; list each once.
+        [...new Map(items.flatMap((item, i) => validate([mediaInfos[i]], clipOf(item))).map((v) => [`${v.platform}|${v.message}`, v])).values()]
+      : validate(mediaInfos);
 
   // Everything stopping the post, each pointing at the section that fixes it.
   const blockers: { message: string; target: string }[] = [];
@@ -500,27 +544,57 @@ export function Composer({
       setSubmitError("Pick a time at least a minute from now.");
       return;
     }
-    const input: CreatePostInput = {
-      ...(assetIds.length > 1 ? { mediaAssetIds: assetIds } : { mediaAssetId: assetIds[0] }),
-      projectId,
-      caption,
-      scheduledFor: when === "later" ? new Date(scheduleAt).toISOString() : null,
-      targets: selectedAccounts.map((a) => ({
-        accountId: a.id,
-        captionOverride: activeOverrides[a.platform] ?? null,
-        options: optionsFor(a.platform),
-      })),
-    };
+    setNeedsPlan(false);
+    const scheduledFor = when === "later" ? new Date(scheduleAt).toISOString() : null;
+    // A batch is one post per clip, each with its clip's caption; otherwise one post of everything.
+    const posts: { key: string | null; input: CreatePostInput }[] = batch
+      ? items.map((item, i) => {
+          const clip = clipOf(item);
+          return {
+            key: item.key,
+            input: {
+              mediaAssetId: assetIds[i],
+              projectId,
+              caption: clip?.caption ?? caption,
+              scheduledFor,
+              targets: selectedAccounts.map((a) => ({ accountId: a.id, options: optionsFor(a.platform, clip) })),
+            },
+          };
+        })
+      : [
+          {
+            key: null,
+            input: {
+              ...(assetIds.length > 1 ? { mediaAssetIds: assetIds } : { mediaAssetId: assetIds[0] }),
+              projectId,
+              caption,
+              scheduledFor,
+              targets: selectedAccounts.map((a) => ({
+                accountId: a.id,
+                captionOverride: activeOverrides[a.platform] ?? null,
+                options: optionsFor(a.platform),
+              })),
+            },
+          },
+        ];
     startSubmit(async () => {
-      const res = await createPostAction(input, tiktokMaxDuration);
-      if (!res.ok) {
-        setSubmitError(res.error);
-        return;
+      let postId = "";
+      for (const [n, post] of posts.entries()) {
+        const res = await createPostAction(post.input, tiktokMaxDuration);
+        if (!res.ok) {
+          setNeedsPlan(!!res.upgrade);
+          setSubmitError(n ? `Posted ${n} of ${posts.length} clips. The rest are still here.\n${res.error}` : res.error);
+          // Drop the clips that went out, so trying again doesn't post them twice.
+          for (const done of posts.slice(0, n)) if (done.key) removeUpload(done.key);
+          return;
+        }
+        postId = res.data.postId;
       }
       setSubmitted(true);
-      if (when === "later") toast.success("Post scheduled", { description: format(new Date(scheduleAt), "EEEE d MMMM, h:mm a") });
-      else toast.success("Publishing now", { description: "Follow each platform's progress on the post page." });
-      router.push(`/posts/${res.data.postId}`);
+      const what = batch ? `${posts.length} clips` : "Post";
+      if (when === "later") toast.success(`${what} scheduled`, { description: format(new Date(scheduleAt), "EEEE d MMMM, h:mm a") });
+      else toast.success(batch ? `Publishing ${what}` : "Publishing now", { description: "Follow each platform's progress on the posts page." });
+      router.push(batch ? "/posts" : `/posts/${postId}`);
     });
   }
 
@@ -531,7 +605,7 @@ export function Composer({
   const vertical = mediaInfo ? isVertical(mediaInfo) : true;
   const shownIndex = Math.min(previewIndex, Math.max(items.length - 1, 0));
   const shown = items[shownIndex] ?? null;
-  const previewCaption = captionFor(activeTab === "all" ? platforms[0] ?? "instagram" : activeTab);
+  const previewCaption = captionFor(activeTab === "all" ? platforms[0] ?? "instagram" : activeTab, clipOf(shown));
   const captionTabs = ["all", ...platforms] as const;
 
   function onTabKey(e: React.KeyboardEvent) {
@@ -548,7 +622,12 @@ export function Composer({
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="min-w-0 space-y-6">
         {/* 1. Media */}
-        <Section id={SECTION.media} step={1} title="Media" description="One vertical 9:16 video, or several photos for a swipeable carousel (TikTok and Instagram).">
+        <Section
+          id={SECTION.media}
+          step={1}
+          title={batch ? "Clips" : "Media"}
+          description={batch ? "Each clip goes out as its own post, in this order." : "One vertical 9:16 video, or several photos for a swipeable carousel (TikTok and Instagram)."}
+        >
           <input
             ref={fileInput}
             id={`${ids}-file`}
@@ -674,7 +753,13 @@ export function Composer({
         </Section>
 
         {/* 3. Caption */}
-        <Section id={SECTION.caption} step={3} title="Caption" description="Write once, or tailor it per platform.">
+        <Section id={SECTION.caption} step={3} title="Caption" description={batch ? undefined : "Write once, or tailor it per platform."}>
+          {batch ? (
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Each clip posts with its own AI-written caption{platforms.includes("youtube") ? " and YouTube title" : ""}. To change one, post that clip on its own from the Clips page.
+            </p>
+          ) : (
+          <>
           {platforms.length > 1 && (
             <div role="tablist" aria-label="Caption per platform" onKeyDown={onTabKey} className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-muted p-1">
               {captionTabs.map((tab) => (
@@ -735,6 +820,8 @@ export function Composer({
             </Button>
           )}
           </div>
+          </>
+          )}
         </Section>
 
         {/* 4. Platform settings */}
@@ -744,6 +831,7 @@ export function Composer({
               {platforms.includes("youtube") && (
                 <div className="space-y-4">
                   <h3 className="flex items-center gap-2 font-semibold"><PlatformIcon platform="youtube" />YouTube</h3>
+                  {!batch && (
                   <Field
                     id={`${ids}-yt-title`}
                     label="Title"
@@ -754,6 +842,7 @@ export function Composer({
                   >
                     <Input id={`${ids}-yt-title`} value={yt.title} maxLength={LIMITS.youtube.titleMax} onChange={(e) => setYt({ ...yt, title: e.target.value })} aria-invalid={!!issuesFor("youtube", "title").length || undefined} />
                   </Field>
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field id={`${ids}-yt-privacy`} label="Visibility">
                       <Select id={`${ids}-yt-privacy`} value={yt.privacy} onChange={(e) => setYt({ ...yt, privacy: e.target.value as YouTubeOptions["privacy"] })}>
@@ -894,12 +983,12 @@ export function Composer({
               // eslint-disable-next-line @next/next/no-img-element
               <img src={shown.previewUrl} alt={`Preview of photo ${shownIndex + 1}`} className="size-full object-contain" />
             )}
-            {isCarousel && (
+            {items.length > 1 && (
               <>
                 <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold text-white tabular-nums" aria-live="polite">
                   {shownIndex + 1}/{items.length}
                 </span>
-                {([[-1, ChevronLeft, "Previous photo", "left-2"], [1, ChevronRight, "Next photo", "right-2"]] as const).map(([step, Icon, label, side]) => (
+                {([[-1, ChevronLeft, batch ? "Previous clip" : "Previous photo", "left-2"], [1, ChevronRight, batch ? "Next clip" : "Next photo", "right-2"]] as const).map(([step, Icon, label, side]) => (
                   <button
                     key={label}
                     type="button"
@@ -968,10 +1057,15 @@ export function Composer({
               </ul>
             )}
             {submitError && <Notice tone="error" className="whitespace-pre-line">{submitError}</Notice>}
+            {needsPlan && <ButtonLink href="/pricing" variant="secondary" className="w-full">See plans</ButtonLink>}
 
             <Button className="w-full" disabled={!canSubmit} loading={submitting || submitted} onClick={submit}>
               {when === "now" ? <Send aria-hidden /> : <CalendarClock aria-hidden />}
-              {when === "now" ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}` : "Schedule post"}
+              {batch
+                ? `${when === "now" ? "Publish" : "Schedule"} ${items.length} clips`
+                : when === "now"
+                  ? `Publish to ${selectedAccounts.length} account${selectedAccounts.length === 1 ? "" : "s"}`
+                  : "Schedule post"}
             </Button>
             {waitReason && <p className="text-center text-xs text-muted-foreground">{waitReason}</p>}
           </CardBody>

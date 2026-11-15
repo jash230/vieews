@@ -135,8 +135,8 @@ export interface UploadItem {
 }
 
 /** Uploads several files at once (a video, or the photos of a carousel), keeping their order. */
-export function useMediaUploads() {
-  const [items, setItems] = useState<UploadItem[]>([]);
+export function useMediaUploads(initial: UploadItem[] = []) {
+  const [items, setItems] = useState<UploadItem[]>(initial);
   const xhrs = useRef(new Map<string, XMLHttpRequest>());
   const shrinks = useRef(new Map<string, AbortController>());
   const previewUrls = useRef(new Set<string>());

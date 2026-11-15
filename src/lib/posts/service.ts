@@ -1,4 +1,6 @@
 import "server-only";
+import { assertWithinPlan, UPLOAD_REF } from "@/lib/billing/plans";
+import { recordUsage } from "@/lib/usage/service";
 import { validateMedia, type MediaInfo, type ValidationIssue } from "@/lib/platforms/limits";
 import { assertProjectOwner, defaultProject, projectAccountIds } from "@/lib/projects/service";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -95,6 +97,7 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
   const scheduledFor = input.scheduledFor ? new Date(input.scheduledFor) : null;
   if (scheduledFor && scheduledFor.getTime() < Date.now() - 60_000) throw new PostValidationError(["Scheduled time is in the past"]);
   const isScheduled = !!scheduledFor && scheduledFor.getTime() > Date.now() + 30_000;
+  await assertWithinPlan(userId, "uploads");
 
   const { data: post, error: postErr } = await db
     .from("posts")
@@ -136,6 +139,8 @@ export async function createPost(userId: string, raw: CreatePostInput, source: "
     await db.from("posts").delete().eq("id", post.id);
     throw tErr;
   }
+  // Counts toward the plan's daily uploads.
+  await recordUsage({ userId, projectId: project.id, kind: "video", provider: "vieews", units: 1, costUsd: 0, ref: UPLOAD_REF });
 
   try {
     await startPublishPost(post.id);

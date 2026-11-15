@@ -6,6 +6,8 @@ export const MODELS = {
   copilot: "claude-haiku-5-5",
   /** One-shot extraction, e.g. drafting a project from a store listing. */
   draft: "claude-haiku-5-5",
+  /** Picking viral moments from a long transcript: judgement matters more than speed here. */
+  clips: "claude-sonnet-5-5",
 } as const;
 
 interface Price {

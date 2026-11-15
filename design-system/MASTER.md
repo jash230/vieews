@@ -48,18 +48,17 @@ Radius: 12 (small controls, inputs) / 16 (buttons, tiles) / 24 (cards) / 32 (lan
 Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entrances). Micro-interactions 150–300ms; entrances 500–600ms with 80–90ms stagger. Animate transform/opacity only. Utilities: `animate-fade-up`, `animate-pop-in`, `animate-float`, `animate-wiggle`, `animate-hop`, `animate-shimmer`, `animate-stripes`. The global `prefers-reduced-motion` override in `globals.css` cuts every CSS animation to its end frame, except the landing orbit, which only slows down. The motion-based components check `useReducedMotion` themselves.
 
 ## Landing page
-- Story: autopilot. Vieews makes, schedules and publishes the posts; the user checks in; the copilot guides. Features that haven't shipped carry a "Coming soon" chip so the site stays accurate for platform reviewers. No pricing section until tiers are settled.
-- Hero: Fredoka headline "Your app's social marketing, on autopilot." with "on autopilot." over a tea-green marker. The pill above it says "Posting to [word]", where `WordRotate` cycles YouTube → Instagram → TikTok. Screen readers get the static sentence.
-- `PlatformOrbit`: the three supported platforms alternating with Vieews feature tiles (copilot, schedule, auto-made posts) on a tilted ring spinning in 3D around the Vieews mark. Pure CSS, so tiles grow at the front and shrink at the back through perspective. It never stops: no hover pause, and under reduced motion it is exempt from the global cut-off and turns slower (90s per lap) instead.
-- Header: sticky and translucent; logo, in-page section links (from 640px), "Sign in" (ghost) and "Get started".
-- From 1024px up, the hero and feature cards fill the first screen and the column widens past the app's `max-w-6xl` (`max-w-7xl`, 88rem from 1536px), so laptops get a full-screen first view. Below 1024px it flows normally.
-- Floating palette blobs, stagger-in feature cards, and a Prussian CTA band.
+- Like an AI chat: you land on the box. One screen, nothing to scroll: a platform pill, the Fredoka headline "Turn long videos into viral clips" ("viral clips" over a tea-green marker), one sentence on what Vieews does (kept for platform reviewers), and the `PromptBox` with "Find clips". Everyone lands here, signed in or not.
+- Find clips keeps the link in localStorage (`src/lib/clips/pending.ts`) and goes to /clips, through sign-in first if needed (`redirect_url=/clips`). /clips starts it; without a plan it goes to /pricing once, and checkout comes back to /clips to start it.
+- Header: logo, and "Sign in" (ghost) or "Open app". Footer keeps the legal links visible (TikTok review).
+- Two floating palette blobs. `PlatformOrbit` and `WordRotate` are no longer on the page.
 
 ## Third-party components (21st.dev)
 - `src/components/ui/word-rotate.tsx`: adapted from "Dia Text" by animbits.
 - `src/components/ui/loader.tsx`: adapted from "Loader" by my, trimmed to 4 variants.
+- `src/components/ui/prompt-box.tsx`: adapted from "Chatgpt Prompt Input" by jahed: the rounded 28px composer, tools left, send right. Trimmed to one link field, no Radix.
 
-Both use `motion`.
+The first two use `motion`.
 
 ## Layout
 Mobile-first. A 56px top bar holds the logo, the project menu, the workspace tabs (a second row below 768px), the Copilot button (below 1024px) and the user menu. Content `max-w-6xl`, gutters 16 / 24 / 40px.

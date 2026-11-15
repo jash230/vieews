@@ -27,7 +27,8 @@ export default function SignInPage() {
           <ClerkLoading>
             <CardPlaceholder />
           </ClerkLoading>
-          <SignIn forceRedirectUrl="/dashboard" />
+          {/* Fallback, not force: the home page sends people here with redirect_url=/clips to carry on finding clips. */}
+          <SignIn withSignUp fallbackRedirectUrl="/dashboard" signUpFallbackRedirectUrl="/dashboard" />
         </Suspense>
       </div>
     </div>

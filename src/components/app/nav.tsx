@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, FolderKanban, KeyRound, LayoutDashboard, Link2, PenSquare } from "lucide-react";
+import { CalendarClock, FolderKanban, Gem, KeyRound, LayoutDashboard, Link2, PenSquare, Scissors } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -9,10 +9,12 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/compose", label: "Create post", icon: PenSquare },
+  { href: "/clips", label: "Clips", icon: Scissors },
   { href: "/posts", label: "Posts", icon: CalendarClock },
   { href: "/accounts", label: "Accounts", icon: Link2 },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/settings", label: "AI & API keys", icon: KeyRound },
+  { href: "/pricing", label: "Plans", icon: Gem },
 ] as const;
 
 type TabsProps = { className?: string; vertical?: boolean };

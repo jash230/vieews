@@ -4,13 +4,16 @@ import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { disconnectAccount, getAccount, getValidAccessToken } from "@/lib/accounts/service";
 import { createMediaAsset, createSignedUpload, createSignedUploadUrl, finalizeMediaAsset, thumbnailPathFor, type NewMediaInput } from "@/lib/media/service";
+import { PlanLimitError } from "@/lib/billing/plans";
 import { approveProposal, declineProposal } from "@/lib/copilot/proposals";
+import { ClipError, createClipJob, discardClip, getClipJob } from "@/lib/clips/service";
+import { startClipJob } from "@/lib/clips/start";
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
 import type { CreatePostInput } from "@/lib/posts/schema";
 import { cancelPost, createPost, deletePost, postProgress, PostValidationError, retryTarget } from "@/lib/posts/service";
 import { createProjectFromLink } from "@/lib/projects/create-from-link";
-import { setCurrentProjectCookie } from "@/lib/projects/current";
+import { getCurrentProject, setCurrentProjectCookie } from "@/lib/projects/current";
 import {
   assertProjectOwner,
   createProject,
@@ -24,14 +27,16 @@ import {
   type ProjectMediaInput,
 } from "@/lib/projects/service";
 
-export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
+/** `upgrade` means a plan limit stopped it, so the UI can offer the plans page. */
+export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string; upgrade?: true };
 
 async function run<T>(fn: (userId: string) => Promise<T>): Promise<ActionResult<T>> {
   const { userId } = await auth.protect();
   try {
     return { ok: true, data: await fn(userId) };
   } catch (err) {
-    if (err instanceof PostValidationError) return { ok: false, error: err.message };
+    if (err instanceof PlanLimitError) return { ok: false, error: err.message, upgrade: true };
+    if (err instanceof PostValidationError || err instanceof ClipError) return { ok: false, error: err.message };
     console.error(err);
     return { ok: false, error: err instanceof Error ? err.message : "Something went wrong" };
   }
@@ -203,5 +208,30 @@ export async function revokeApiKeyAction(id: string) {
   return run(async (userId) => {
     await revokeApiKey(userId, id);
     revalidatePath("/settings");
+  });
+}
+
+export async function startClipJobAction(input: { sourceUrl?: string | null; sourceAssetId?: string | null }) {
+  return run(async (userId) => {
+    const project = await getCurrentProject(userId).catch(() => null);
+    const job = await createClipJob(userId, { sourceUrl: input.sourceUrl, sourceAssetId: input.sourceAssetId, projectId: project?.id ?? null });
+    await startClipJob(job.id);
+    revalidatePath("/clips");
+    return { jobId: job.id };
+  });
+}
+
+export async function clipJobProgressAction(jobId: string) {
+  return run(async (userId) => {
+    const job = await getClipJob(userId, jobId);
+    if (!job) throw new ClipError("Clip job not found.");
+    return { status: job.status, clipsDone: job.clips_done, clipsTotal: job.clips_total, error: job.error };
+  });
+}
+
+export async function discardClipAction(clipId: string) {
+  return run(async (userId) => {
+    const { jobId } = await discardClip(userId, clipId);
+    revalidatePath(`/clips/${jobId}`);
   });
 }

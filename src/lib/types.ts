@@ -126,3 +126,46 @@ export interface PostTargetRow {
   created_at: string;
   updated_at: string;
 }
+
+export type ClipJobStatus = "queued" | "downloading" | "transcribing" | "finding" | "rendering" | "ready" | "failed";
+
+/** One spoken word: text, start and end in seconds from the start of the source video. */
+export interface TranscriptWord {
+  w: string;
+  s: number;
+  e: number;
+}
+
+export interface ClipJobRow {
+  id: string;
+  user_id: string;
+  project_id: string | null;
+  source_url: string | null;
+  source_asset_id: string | null;
+  status: ClipJobStatus;
+  error: string | null;
+  target_length_s: number;
+  source_title: string | null;
+  source_duration_s: number | null;
+  transcript: TranscriptWord[] | null;
+  sandbox_name: string | null;
+  clips_total: number;
+  clips_done: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClipRow {
+  id: string;
+  job_id: string;
+  user_id: string;
+  media_asset_id: string | null;
+  start_s: number;
+  end_s: number;
+  title: string;
+  hook: string;
+  caption: string;
+  score: number;
+  reason: string;
+  created_at: string;
+}

@@ -8,6 +8,7 @@ import { NoProject } from "@/components/app/no-project";
 import { listAccounts } from "@/lib/accounts/service";
 import { getCurrentProject } from "@/lib/projects/current";
 import { composeAccounts, projectsByAccount } from "@/lib/projects/service";
+import { clipForCompose } from "@/lib/clips/service";
 import { Composer } from "./composer";
 
 export const metadata = { title: "Create post" };
@@ -42,8 +43,15 @@ function ComposeSkeleton() {
 
 async function ComposeForm({ searchParams }: Pick<PageProps<"/compose">, "searchParams">) {
   const { userId } = await auth.protect();
-  const { at } = await searchParams;
-  const [project, all, byAccount] = await Promise.all([getCurrentProject(userId), listAccounts(userId), projectsByAccount(userId)]);
+  const { at, clip: clipParam } = await searchParams;
+  // ?clip=a,b,c from the Clips page's "Post all": one post per clip.
+  const clipIds = typeof clipParam === "string" ? clipParam.split(",").slice(0, 20) : [];
+  const [project, all, byAccount, clips] = await Promise.all([
+    getCurrentProject(userId),
+    listAccounts(userId),
+    projectsByAccount(userId),
+    Promise.all(clipIds.map((id) => clipForCompose(userId, id).catch(() => null))),
+  ]);
   if (!project) return <NoProject />;
   const { linked: accounts, unassigned } = composeAccounts(all, byAccount, project.id);
 
@@ -58,6 +66,6 @@ async function ComposeForm({ searchParams }: Pick<PageProps<"/compose">, "search
       />
     </Card>
   ) : (
-    <Composer key={project.id} accounts={accounts} unassigned={unassigned} projectId={project.id} initialAt={typeof at === "string" ? at : undefined} />
+    <Composer key={project.id} accounts={accounts} unassigned={unassigned} projectId={project.id} initialAt={typeof at === "string" ? at : undefined} initialClips={clips.filter((c) => c !== null)} />
   );
 }
