@@ -10,6 +10,7 @@ import { isTooBig } from "@/lib/media/shrink-plan";
 import { cn } from "@/lib/utils";
 import { startClipJobAction } from "../actions";
 import { uploadFile } from "../compose/media";
+import { LockedPreview } from "./locked-preview";
 
 /** Paste a link or attach a file, and start a clipping job. Picks up a link pasted on the home page before sign-in. */
 export function ClipForm() {
@@ -22,6 +23,7 @@ export function ClipForm() {
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [needsPlan, setNeedsPlan] = useState(false);
+  const [locked, setLocked] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const busy = pending || progress !== null;
 
@@ -36,6 +38,7 @@ export function ClipForm() {
   function go(source: PendingClip | null) {
     setError(null);
     setNeedsPlan(false);
+    setLocked(null);
     if (source?.sourceUrl) setUrl(source.sourceUrl);
     startTransition(async () => {
       let req = source;
@@ -52,10 +55,12 @@ export function ClipForm() {
       req ??= { sourceUrl: url };
       const res = await startClipJobAction({ sourceUrl: req.sourceUrl, sourceAssetId: req.sourceAssetId });
       if (!res.ok) {
-        // No plan yet, or today's clips are used up: keep the request so it starts after they subscribe.
+        // No plan yet, or today's clips are used up: keep the request so it starts after they subscribe,
+        // and show the locked clips with the plans right here.
         if (res.upgrade && !req.paywalled) {
           stashPendingClip({ ...req, paywalled: true });
-          return router.push("/pricing");
+          setError(res.error);
+          return setLocked(req.sourceUrl ?? file?.name ?? "your video");
         }
         setNeedsPlan(!!res.upgrade);
         return setError(res.error);
@@ -144,6 +149,7 @@ export function ClipForm() {
         }
       />
       {needsPlan && <ButtonLink href="/pricing" variant="secondary" className="ml-4 mt-3">See plans</ButtonLink>}
+      {locked && <div className="mt-8"><LockedPreview source={locked} /></div>}
     </div>
   );
 }

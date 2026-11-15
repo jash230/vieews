@@ -1,7 +1,7 @@
-import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { AccountMenu } from "@/components/app/account-menu";
 import { Logo } from "@/components/app/logo";
 import { NavTabs } from "@/components/app/nav";
 import { ProjectSwitcher } from "@/components/app/project-switcher";
@@ -14,7 +14,7 @@ import { listProjectOptions } from "@/lib/projects/options";
 // Signed-in pages are private: keep them (and their sign-in redirects) out of search results.
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
-// The app shell: the sidebar on the left, the workspace in the middle, the copilot docked on the right.
+// The app shell: the sidebar on the left, the workspace, then the copilot.
 
 async function TopProjectMenu() {
   const { userId } = await auth.protect();
@@ -50,7 +50,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
             </Suspense>
             <span className="flex-1" />
             <CopilotToggle />
-            <UserButton />
+            <AccountMenu />
           </div>
           <NavTabs className="px-2 pb-2" />
         </header>
@@ -63,7 +63,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
           </Suspense>
           <NavTabs vertical className="-mx-1 flex-1 px-1" />
           <div className="flex items-center gap-2 border-t border-border px-1 pt-3">
-            <UserButton showName />
+            <AccountMenu showName />
           </div>
         </aside>
 

@@ -1,6 +1,8 @@
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, XCircle } from "lucide-react";
+import Link from "next/link";
+import { LocalTime } from "@/components/app/local-time";
 import { Loader } from "@/components/ui/loader";
-import type { ClipJobStatus } from "@/lib/types";
+import type { ClipJobRow, ClipJobStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<ClipJobStatus, { label: string; className: string; done?: "ok" | "fail" }> = {
@@ -30,5 +32,35 @@ export function ClipJobBadge({ status, className }: { status: ClipJobStatus; cla
       {s.done === "ok" ? <CheckCircle2 className="size-3.5" aria-hidden /> : s.done === "fail" ? <XCircle className="size-3.5" aria-hidden /> : <Loader variant="dots" size={14} label={null} />}
       {s.label}
     </span>
+  );
+}
+
+function sourceLabel(job: { source_title: string | null; source_url: string | null }) {
+  if (job.source_title) return job.source_title;
+  if (!job.source_url) return "Uploaded video";
+  try {
+    const u = new URL(job.source_url);
+    return `${u.hostname.replace(/^www\./, "")}${u.pathname.length > 1 ? u.pathname : ""}`;
+  } catch {
+    return job.source_url;
+  }
+}
+
+/** One clipping job in a list, linking to its clips. */
+export function ClipJobItem({ job }: { job: Omit<ClipJobRow, "transcript"> }) {
+  return (
+    <li>
+      <Link href={`/clips/${job.id}`} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-surface">
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="truncate text-sm font-semibold">{sourceLabel(job)}</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <ClipJobBadge status={job.status} />
+            {job.status === "ready" && <span>{job.clips_done} clips</span>}
+            <LocalTime iso={job.created_at} fmt="d MMM, h:mm a" />
+          </div>
+        </div>
+        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      </Link>
+    </li>
   );
 }

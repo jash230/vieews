@@ -36,10 +36,10 @@ Radius: 12 (small controls, inputs) / 16 (buttons, tiles) / 24 (cards) / 32 (lan
 - Section saves (project settings): each card saves on its own; a save in one never resets another's unsaved edits.
 - Status: always icon + text (`StatusBadge`), never color alone. In-flight states (publishing, processing) show `Loader` dots.
 - Empty states: floating icon tile + title + one sentence + one action.
-- Nav: active item gets `primary-soft` + an olive pill; icons wiggle on hover. `useLinkStatus` shows hopping dots while a route is still loading.
+- Nav: five items (Dashboard, Clips, Posts, Accounts, Projects). Plans and AI & API keys live in the user menu (`AccountMenu`). The active item gets `primary-soft` plus an olive pill, and icons wiggle on hover. There is no loading indicator on page moves.
 
 ## Loading
-- Route loads: `loading.tsx` keeps the page's skeleton shapes (no layout shift) with `BrandLoader` (the V mark, three dots hopping in turn) over the main block.
+- Route loads: no `loading.tsx` and no page-move animation (the user dislikes them). Pages stream their own Suspense skeletons.
 - Content placeholders: `Skeleton` uses a tea-tinted `shimmer` sweep.
 - Inline: `Loader` (`src/components/ui/loader.tsx`, variants spinner / dots / bars / morph). Pass `label={null}` when nearby text already says what's loading.
 - Upload progress: deep-teal bar with moving `stripes`.
@@ -49,7 +49,7 @@ Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entr
 
 ## Landing page
 - Like an AI chat: you land on the box. One screen, nothing to scroll: a platform pill, the Fredoka headline "Turn long videos into viral clips" ("viral clips" over a tea-green marker), one sentence on what Vieews does (kept for platform reviewers), and the `PromptBox` with "Find clips". Everyone lands here, signed in or not.
-- Find clips keeps the link in localStorage (`src/lib/clips/pending.ts`) and goes to /clips, through sign-in first if needed (`redirect_url=/clips`). /clips starts it; without a plan it goes to /pricing once, and checkout comes back to /clips to start it.
+- Find clips keeps the link in localStorage (`src/lib/clips/pending.ts`) and goes to /clips, through sign-in first if needed (`redirect_url=/clips`). /clips starts it. Without a plan, /clips shows a locked mock preview (three 9:16 cards with a lock) and Clerk's `PricingTable` inline, with no redirect. Checkout comes back to /clips and starts it.
 - Header: logo, and "Sign in" (ghost) or "Open app". Footer keeps the legal links visible (TikTok review).
 - Two floating palette blobs. `PlatformOrbit` and `WordRotate` are no longer on the page.
 
@@ -61,8 +61,8 @@ Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entr
 The first two use `motion`.
 
 ## Layout
-Mobile-first. A 56px top bar holds the logo, the project menu, the workspace tabs (a second row below 768px), the Copilot button (below 1024px) and the user menu. Content `max-w-6xl`, gutters 16 / 24 / 40px.
-The copilot docks on the left at ≥1024px (resizable 320–560px by drag or arrow keys, collapsible to a rail). Below 1024px it's an overlay opened from the top bar: full screen under 768px, a 26rem right sheet over a scrim from 768px. It acts as a dialog: focus moves to its input, Esc or the scrim closes it, focus returns to the button, and following a link from the chat closes it. The chat only auto-scrolls while you're at the bottom; otherwise a "Jump to latest" pill appears.
+Mobile-first. From 768px, a 240px left sidebar holds the logo, the project menu, the nav and the user menu. Below 768px, a 56px top bar holds the project menu, the Copilot button and the user menu, with the nav as a sideways-scrolling row under it. Content `max-w-6xl`, gutters 16 / 24 / 40px.
+The copilot docks beside the workspace at ≥1024px (resizable 320–560px by drag or arrow keys, collapsible to a rail). Below 1024px it's an overlay opened from the top bar: full screen under 768px, a 26rem right sheet over a scrim from 768px. It acts as a dialog: focus moves to its input, Esc or the scrim closes it, focus returns to the button, and following a link from the chat closes it. The chat only auto-scrolls while you're at the bottom; otherwise a "Jump to latest" pill appears.
 Main + side-column pages (dashboard, compose, AI & API keys) go two-column at ≥1280px, since the docked copilot leaves too little room at 1024px. Below that, the composer keeps a sticky action bar (Publish/Schedule plus what's blocking it) that steps aside when the real publish card is on screen. Grid tracks that hold text use `minmax(0,1fr)`, never a bare `1fr`, so a long line (a caption, a code snippet) can't push the side column off-screen. Code snippets wrap instead of scrolling.
 
 ## Accessibility

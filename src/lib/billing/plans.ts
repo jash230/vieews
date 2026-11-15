@@ -47,7 +47,7 @@ export async function planOf(userId: string): Promise<PlanSlug> {
 
 const dayAgo = () => new Date(Date.now() - 24 * 60 * 60_000).toISOString();
 
-async function usedToday(userId: string, what: "clips" | "uploads"): Promise<number> {
+export async function usedToday(userId: string, what: "clips" | "uploads"): Promise<number> {
   const db = supabaseAdmin();
   // Failed clip jobs don't count: the user got nothing from them. Uploads come from the usage ledger, so deleting a post doesn't refund one.
   const q =

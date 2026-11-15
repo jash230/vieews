@@ -1,20 +1,17 @@
 "use client";
 
-import { CalendarClock, FolderKanban, Gem, KeyRound, LayoutDashboard, Link2, PenSquare, Scissors } from "lucide-react";
-import Link, { useLinkStatus } from "next/link";
+import { CalendarClock, FolderKanban, LayoutDashboard, Link2, Scissors } from "lucide-react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/compose", label: "Create post", icon: PenSquare },
   { href: "/clips", label: "Clips", icon: Scissors },
   { href: "/posts", label: "Posts", icon: CalendarClock },
   { href: "/accounts", label: "Accounts", icon: Link2 },
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/settings", label: "AI & API keys", icon: KeyRound },
-  { href: "/pricing", label: "Plans", icon: Gem },
 ] as const;
 
 type TabsProps = { className?: string; vertical?: boolean };
@@ -88,7 +85,6 @@ function TabList({ pathname, className, vertical = false }: TabsProps & { pathna
           >
             <Icon className="size-4 group-hover:animate-wiggle" aria-hidden />
             {label}
-            <PendingDots />
             {active && (
               <span
                 className={cn(
@@ -102,18 +98,5 @@ function TabList({ pathname, className, vertical = false }: TabsProps & { pathna
         );
       })}
     </nav>
-  );
-}
-
-/** Hops while this link's route is still loading (prefetch not finished yet). */
-function PendingDots() {
-  const { pending } = useLinkStatus();
-  if (!pending) return null;
-  return (
-    <span className="flex gap-0.5" aria-hidden>
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="size-1.5 animate-hop rounded-full bg-brand-teal" style={{ animationDelay: `${i * 120}ms` }} />
-      ))}
-    </span>
   );
 }
