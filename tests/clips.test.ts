@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assTime, buildAss, displayWord, groupWords, wordsInRange } from "@/lib/clips/captions";
 import { clipFilter, detachedCommand, prepareScript, renderScript, shq, videoKbps, CLIP_MAX_BYTES } from "@/lib/clips/render";
 import { cleanCandidates, MAX_CLIP_S, type ClipCandidate } from "@/lib/clips/select";
+import { explainFailure, parseSourceUrl } from "@/lib/clips/service";
 import { parseDeepgram, snapToSentences, toSentences } from "@/lib/clips/transcript";
 import type { TranscriptWord } from "@/lib/types";
 
@@ -62,9 +63,65 @@ describe("render scripts", () => {
     expect(prepareScript({ kind: "link", url: "https://x.com/a?b=1&c='$(rm -rf /)'" })).toContain(`'https://x.com/a?b=1&c='\\''$(rm -rf /)'\\'''`);
   });
 
-  it("only fetches yt-dlp for links", () => {
-    expect(prepareScript({ kind: "link", url: "https://youtu.be/x" })).toContain("yt-dlp");
-    expect(prepareScript({ kind: "file", url: "https://s.example/f.mp4" })).not.toContain("yt-dlp");
+  it("uses yt-dlp only for links, with the proxy taken from the env", () => {
+    const link = prepareScript({ kind: "link", url: "https://youtu.be/x" });
+    expect(link).toContain('./yt-dlp ${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"}');
+    expect(link).toContain("duration <=? 7200");
+    // Links fetch the audio only; the picture comes per clip, at render time.
+    expect(link).toContain("-f 'ba[abr<=70]/ba/b' --write-info-json");
+    const file = prepareScript({ kind: "file", url: "https://s.example/f.mp4" });
+    expect(file).toContain("curl -fsSL --retry 3 --max-filesize 4294967296 -o src.mp4 'https://s.example/f.mp4'");
+    expect(file).not.toContain("yt-dlp");
+  });
+
+  it("accepts site links and asks Dropbox for the file, not its preview page", () => {
+    expect(parseSourceUrl(" https://youtu.be/x ")).toBe("https://youtu.be/x");
+    expect(parseSourceUrl("https://www.tiktok.com/@a/video/1")).toBe("https://www.tiktok.com/@a/video/1");
+    expect(parseSourceUrl("https://www.dropbox.com/scl/fi/abc/ep1.mp4?rlkey=k&dl=0")).toBe("https://www.dropbox.com/scl/fi/abc/ep1.mp4?rlkey=k&dl=1");
+    expect(() => parseSourceUrl("ftp://s.example/f.mp4")).toThrow(/http/);
+    // Every spelling of one YouTube video becomes the same link, which is what the transcript cache matches on.
+    const canonical = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+    for (const spelling of ["https://youtu.be/dQw4w9WgXcQ?si=abc", "https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PL1&t=42s", "https://www.youtube.com/shorts/dQw4w9WgXcQ", "https://youtube.com/live/dQw4w9WgXcQ?feature=share"]) {
+      expect(parseSourceUrl(spelling)).toBe(canonical);
+    }
+    expect(parseSourceUrl("https://notyoutube.com/watch?v=dQw4w9WgXcQ")).toBe("https://notyoutube.com/watch?v=dQw4w9WgXcQ");
+  });
+
+  it("routes link downloads through WARP when a profile is set, and never fails the job over it", () => {
+    for (const script of [prepareScript({ kind: "link", url: "https://youtu.be/x" }), renderScript(0, 1, 9, "https://youtu.be/x")]) {
+      expect(script).toContain('[ -n "${WARP_PROFILE_B64:-}" ] || return 0');
+      expect(script).toContain("export YTDLP_PROXY=http://127.0.0.1:40000");
+      expect(script).toContain("BindAddress = 127.0.0.1:40000");
+      expect(script).toContain("warp_up || true");
+      // The tunnel must be up before the first yt-dlp call.
+      expect(script.indexOf("warp_up || true")).toBeLessThan(script.indexOf("./yt-dlp ${YTDLP_PROXY"));
+    }
+    expect(prepareScript({ kind: "file", url: "https://s.example/f.mp4" })).not.toContain("warp");
+    expect(renderScript(0, 1, 9)).not.toContain("warp");
+  });
+
+  it("downloads nothing in prepare when the transcript is already known", () => {
+    const cached = prepareScript({ kind: "link", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }, true);
+    expect(cached).toContain("chmod +x yt-dlp");
+    expect(cached).not.toMatch(/src\.mp4|audio\.mp3/);
+  });
+
+  it("explains a blocked download, an oversized file and a refused one", () => {
+    expect(explainFailure("prepare", "ERROR: Sign in to confirm you’re not a bot")).toMatch(/blocked/);
+    expect(explainFailure("prepare", "curl: (63) Maximum file size exceeded")).toMatch(/4 GB/);
+    expect(explainFailure("prepare", "curl: (22) The requested URL returned error: 403")).toMatch(/public/);
+  });
+
+  it("downloads only the clipped moment of a link, at 720p, and cuts uploads from src.mp4", () => {
+    const link = renderScript(2, 61.5, 101.5, "https://youtu.be/x");
+    expect(link).toContain(`./yt-dlp \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"}`);
+    expect(link).toContain("-S res:720 --download-sections '*61.500-101.500'");
+    // Reuses the lookup saved at download time, and asks the site again only if that fails.
+    expect(link).toContain("get --load-info-json src.mp4.info.json || get 'https://youtu.be/x'");
+    expect(link).toContain("-ss 0.000 -i clip-2-src.mp4 -t 40.000");
+    const upload = renderScript(2, 61.5, 101.5);
+    expect(upload).toContain("-ss 61.500 -i src.mp4 -t 40.000");
+    expect(upload).not.toContain("yt-dlp");
   });
 
   it("records the exit code of a detached phase", () => {

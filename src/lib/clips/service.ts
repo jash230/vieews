@@ -23,6 +23,13 @@ export interface NewClipJob {
   sourceAssetId?: string | null;
 }
 
+/** The video ID of a YouTube link in any of its shapes (watch, youtu.be, shorts, live, embed), else null. */
+export function youtubeId(url: URL): string | null {
+  const host = url.hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+  const id = host === "youtu.be" ? url.pathname.slice(1) : host === "youtube.com" ? (url.searchParams.get("v") ?? url.pathname.match(/^\/(?:shorts|live|embed)\/([^/]+)/)?.[1]) : null;
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
+}
+
 export function parseSourceUrl(raw: string): string {
   let url: URL;
   try {
@@ -31,6 +38,11 @@ export function parseSourceUrl(raw: string): string {
     throw new ClipError("That doesn't look like a link. Paste the full address, starting with https://");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new ClipError("Only http and https links work.");
+  // One spelling per YouTube video, so a repeat of the same video finds the earlier job's transcript (see cachedTranscript).
+  const yt = youtubeId(url);
+  if (yt) return `https://www.youtube.com/watch?v=${yt}`;
+  // Dropbox's documented switch from its preview page to the file itself.
+  if (/(^|\.)dropbox\.com$/i.test(url.hostname)) url.searchParams.set("dl", "1");
   return url.toString();
 }
 
@@ -164,6 +176,7 @@ async function setStatus(jobId: string, status: ClipJobStatus) {
 /** Turns the end of a failed phase's log into something a person can act on. */
 export function explainFailure(phase: string, log: string): string {
   if (/TOO_LONG|does not pass filter/i.test(log)) return "This video is over 2 hours. Clip a shorter one, or trim it and upload the file.";
+  if (/curl: \(63\)|larger than max-filesize/i.test(log)) return "This file is over 4 GB. Export a smaller version and try again.";
   if (/confirm you.?re not a bot|Sign in to confirm|HTTP Error 429|blocked/i.test(log)) {
     return "The site blocked the download from our servers. Download the video yourself and upload the file instead.";
   }
@@ -177,8 +190,33 @@ export function explainFailure(phase: string, log: string): string {
   return "Couldn't process this video. Try again, or upload the file instead.";
 }
 
-/** Starts the sandbox and the download. */
-export async function startPrepare(jobId: string): Promise<void> {
+/**
+ * An earlier job's transcript of the same YouTube video, from any user: a repeat link then skips the audio download and the transcription.
+ * YouTube only, because a video ID always names the same video, while any other link can be pointed at a new file.
+ * shortcut: a video trimmed in YouTube's editor after it was cached gets captions that are off; add a max age if that shows up.
+ */
+async function cachedTranscript(job: ClipJobRow): Promise<Pick<ClipJobRow, "transcript" | "source_title" | "source_duration_s"> | null> {
+  if (!job.source_url || !youtubeId(new URL(job.source_url))) return null;
+  const { data } = await db()
+    .from("clip_jobs")
+    .select("transcript, source_title, source_duration_s")
+    .eq("source_url", job.source_url)
+    .neq("id", job.id)
+    .not("transcript", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.transcript?.length ? (data as Pick<ClipJobRow, "transcript" | "source_title" | "source_duration_s">) : null;
+}
+
+/** What a link download needs in the sandbox: the WARP profile and the fallback proxy, whichever are set. */
+function linkEnv(): Record<string, string> {
+  const { WARP_PROFILE_B64, YTDLP_PROXY } = process.env;
+  return { ...(WARP_PROFILE_B64 ? { WARP_PROFILE_B64 } : {}), ...(YTDLP_PROXY ? { YTDLP_PROXY } : {}) };
+}
+
+/** Starts the sandbox and the download. Returns true when the transcript came from an earlier job, so there is nothing to transcribe. */
+export async function startPrepare(jobId: string): Promise<boolean> {
   const job = await loadJob(jobId);
   await setStatus(jobId, "downloading");
   let source: Source;
@@ -191,7 +229,10 @@ export async function startPrepare(jobId: string): Promise<void> {
   }
   const sandbox = await createJobSandbox(jobId);
   await patchJob(jobId, { sandbox_name: sandbox.name });
-  await startPhase(sandbox, "prepare", prepareScript(source));
+  const cached = source.kind === "link" ? await cachedTranscript(job) : null;
+  if (cached) await patchJob(jobId, cached);
+  await startPhase(sandbox, "prepare", prepareScript(source, !!cached), source.kind === "link" ? linkEnv() : undefined);
+  return !!cached;
 }
 
 /** Waits a bounded time for a phase. Throws ClipError when it failed. */
@@ -203,6 +244,9 @@ export async function waitForPhase(jobId: string, phase: string): Promise<boolea
   if (!state.ok) {
     console.error(`clip ${jobId} phase ${phase} failed:\n${state.log}`);
     throw new ClipError(explainFailure(phase, state.log));
+  }
+  if (phase === "prepare" && !job.source_asset_id) {
+    console.log(`clip ${jobId} download route: ${(await readText(await jobSandbox(job.sandbox_name), "route.txt")).trim() || "proxy-or-direct"}`);
   }
   return true;
 }
@@ -272,7 +316,9 @@ async function loadClip(clipId: string): Promise<ClipRow> {
 export async function startRender(jobId: string, clipId: string, n: number): Promise<void> {
   const [job, clip] = await Promise.all([loadJob(jobId), loadClip(clipId)]);
   const ass = buildAss(wordsInRange(job.transcript ?? [], clip.start_s, clip.end_s));
-  await startPhase(await jobSandbox(job.sandbox_name!), `render-${n}`, renderScript(n, clip.start_s, clip.end_s), undefined, [{ path: `clip-${n}.ass`, content: ass }]);
+  // A link job has only the audio in the sandbox, so the render fetches this moment's picture itself.
+  const link = job.source_asset_id ? undefined : (job.source_url ?? undefined);
+  await startPhase(await jobSandbox(job.sandbox_name!), `render-${n}`, renderScript(n, clip.start_s, clip.end_s, link), link ? linkEnv() : undefined, [{ path: `clip-${n}.ass`, content: ass }]);
 }
 
 /** Uploads a rendered clip and its poster frame to storage, and links it to the clip. */

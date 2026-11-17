@@ -38,21 +38,26 @@ async function waitFor(jobId: string, phase: string, maxWaits: number) {
 export async function clipVideoWorkflow(jobId: string) {
   "use workflow";
   try {
-    await startPrepareStep(jobId);
+    const haveTranscript = await startPrepareStep(jobId);
     await waitFor(jobId, "prepare", MAX_WAITS.prepare);
-    await startTranscribeStep(jobId);
-    await waitFor(jobId, "transcribe", MAX_WAITS.transcribe);
-    await finishTranscribeStep(jobId);
-    const clips = await pickClipsStep(jobId);
-    for (const clip of clips) {
-      try {
-        await startRenderStep(jobId, clip.id, clip.n);
-        await waitFor(jobId, `render-${clip.n}`, MAX_WAITS.render);
-        await finishRenderStep(jobId, clip.id, clip.n);
-      } catch (err) {
-        await dropClipStep(jobId, clip.id, messageOf(err));
-      }
+    if (!haveTranscript) {
+      await startTranscribeStep(jobId);
+      await waitFor(jobId, "transcribe", MAX_WAITS.transcribe);
+      await finishTranscribeStep(jobId);
     }
+    const clips = await pickClipsStep(jobId);
+    // All clips render at once: a link's section download is throttled to about twice real time, so one after another is the slow part.
+    await Promise.all(
+      clips.map(async (clip) => {
+        try {
+          await startRenderStep(jobId, clip.id, clip.n);
+          await waitFor(jobId, `render-${clip.n}`, MAX_WAITS.render);
+          await finishRenderStep(jobId, clip.id, clip.n);
+        } catch (err) {
+          await dropClipStep(jobId, clip.id, messageOf(err));
+        }
+      }),
+    );
     await finishJobStep(jobId, null);
   } catch (err) {
     console.error(`clip job ${jobId} failed:`, messageOf(err));

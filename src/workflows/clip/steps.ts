@@ -22,10 +22,11 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function startPrepareStep(jobId: string): Promise<void> {
+/** True when an earlier job already transcribed this video, so the transcribe steps are skipped. */
+export async function startPrepareStep(jobId: string): Promise<boolean> {
   "use step";
   const s = await import("@/lib/clips/service");
-  await guard(() => s.startPrepare(jobId));
+  return guard(() => s.startPrepare(jobId));
 }
 
 /** True once the phase finished; false when it's still running after a few minutes. */

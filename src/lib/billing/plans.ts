@@ -10,7 +10,17 @@ export const PLANS = {
   free: { name: "Free", uploadsPerDay: 1, clipsPerDay: 0 },
   pro: { name: "Pro", uploadsPerDay: 5, clipsPerDay: 5 }, // $20/month
   max: { name: "Max", uploadsPerDay: 15, clipsPerDay: 15 }, // $50/month
+  // Owner only, never sold. Caps stay finite so a hijacked session can't run up an unbounded bill.
+  yardenos: { name: "Yardenos", uploadsPerDay: 100, clipsPerDay: 50 },
 } as const;
+
+/** Copilot spend allowed per 24 hours on the Yardenos plan. */
+export const YARDENOS_AI_BUDGET_USD = 10;
+
+/** Clerk user IDs that get the Yardenos plan, comma-separated in env so the public repo doesn't name them. IDs, not emails: Clerk sets them. */
+export function isYardenos(userId: string): boolean {
+  return (process.env.YARDENOS_USER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(userId);
+}
 
 export type PlanSlug = keyof typeof PLANS;
 
@@ -35,6 +45,7 @@ export function planFromItems(items: SubscriptionItem[], now = Date.now()): Plan
 }
 
 export async function planOf(userId: string): Promise<PlanSlug> {
+  if (isYardenos(userId)) return "yardenos";
   try {
     const sub = await (await clerkClient()).billing.getUserBillingSubscription(userId);
     return planFromItems(sub.subscriptionItems);

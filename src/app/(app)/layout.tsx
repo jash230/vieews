@@ -70,7 +70,10 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         <div className="flex min-h-0 flex-1">
           {/* tabIndex lets "Skip to content" actually move keyboard focus here, not just scroll. */}
           <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
-            <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
+            <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+              {/* Pages read params/auth at request time; no fallback, since page moves show no loader. */}
+              <Suspense>{children}</Suspense>
+            </div>
           </main>
           <Suspense fallback={<CopilotSkeleton />}>
             <CopilotServer />

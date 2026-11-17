@@ -47,9 +47,9 @@ export const CLIP_REF_PREFIX = "clip";
 export const CLIP_USD_PER_VIDEO = 1;
 
 /** True once the account has used up its AI budget for the last 24 hours. Clipping doesn't count toward it. */
-export async function aiBudgetSpent(userId: string, now = new Date()): Promise<boolean> {
+export async function aiBudgetSpent(userId: string, limitUsd = DAILY_AI_BUDGET_USD, now = new Date()): Promise<boolean> {
   const { totalUsd } = await usageSummary(userId, new Date(now.getTime() - 24 * 60 * 60_000), { excludeRefPrefix: CLIP_REF_PREFIX });
-  return totalUsd >= DAILY_AI_BUDGET_USD;
+  return totalUsd >= limitUsd;
 }
 
 /** True once the account has spent `limitUsd` on clipping in the last 24 hours. */

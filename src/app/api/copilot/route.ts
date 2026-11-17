@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runTurn } from "@/lib/copilot/run";
 import { getProject, ProjectNotFoundError } from "@/lib/projects/service";
 import { aiBudgetSpent } from "@/lib/usage/service";
+import { isYardenos, YARDENOS_AI_BUDGET_USD } from "@/lib/billing/plans";
 
 export const maxDuration = 300;
 
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     if (err instanceof ProjectNotFoundError) return Response.json({ error: "Project not found" }, { status: 404 });
     throw err;
   }
-  if (await aiBudgetSpent(userId)) {
+  if (await aiBudgetSpent(userId, isYardenos(userId) ? YARDENOS_AI_BUDGET_USD : undefined)) {
     return Response.json({ error: "You've reached today's copilot limit. It resets within 24 hours." }, { status: 429 });
   }
   const timeZone = isValidTimeZone(parsed.data.timeZone) ? parsed.data.timeZone : "UTC";

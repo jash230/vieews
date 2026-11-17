@@ -189,7 +189,7 @@ async function DashboardContent() {
           <Card>
             <CardHeader>
               <CardTitle>{limits.name} plan</CardTitle>
-              <Link href="/pricing" className="text-sm font-semibold text-primary hover:underline">{plan === "max" ? "Manage" : "Upgrade"}</Link>
+              <Link href="/pricing" className="text-sm font-semibold text-primary hover:underline">{plan === "free" || plan === "pro" ? "Upgrade" : "Manage"}</Link>
             </CardHeader>
             <ul className="space-y-4 px-5 pb-5">
               {usage.map(({ label, used, limit }) => (

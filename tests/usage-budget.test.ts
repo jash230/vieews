@@ -42,9 +42,14 @@ describe("aiBudgetSpent", () => {
     expect(await aiBudgetSpent("u")).toBe(true);
   });
 
+  it("uses a higher limit when given one", async () => {
+    rows = [{ kind: "llm", cost_usd: String(DAILY_AI_BUDGET_USD * 2) }];
+    expect(await aiBudgetSpent("u", DAILY_AI_BUDGET_USD * 4)).toBe(false);
+  });
+
   it("only counts the last 24 hours", async () => {
     const now = new Date("2026-11-12T12:00:00Z");
-    await aiBudgetSpent("u", now);
+    await aiBudgetSpent("u", undefined, now);
     expect(since).toBe("2026-11-11T12:00:00.000Z");
   });
 });
