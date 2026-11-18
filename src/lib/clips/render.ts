@@ -49,10 +49,14 @@ const WARP_UP = [
   `    [ -x wireproxy ] || curl -fsSL --retry 3 ${shq(WIREPROXY_URL)} | tar xz wireproxy`,
   // IPv4 only: measured 2026-11-16, YouTube bot-checks WARP's IPv6 exits and lets the IPv4 ones through.
   `    { echo "$WARP_PROFILE_B64" | base64 -d | sed -E 's/^(Address = [0-9.\\/]+),.*/\\1/; s/^(DNS = [0-9., ]*[0-9]),.*/\\1/'; printf '\\n[http]\\nBindAddress = ${WARP_PROXY.slice(7)}\\n'; } > warp.conf`,
-  "    nohup ./wireproxy -c warp.conf > warp.log 2>&1 &",
-  "    for i in $(seq 1 20); do warp_ok && break; sleep 0.5; done",
+  // Three fresh tunnels: one handshake sometimes never completes (seen 2026-11-18), and without WARP YouTube bot-checks us.
+  "    for try in 1 2 3; do",
+  "      pkill -x wireproxy || true",
+  "      nohup ./wireproxy -c warp.conf > warp.log 2>&1 &",
+  "      for i in $(seq 1 30); do warp_ok && break 2; sleep 0.5; done",
+  "    done",
   "  fi",
-  `  if warp_ok; then export YTDLP_PROXY=${WARP_PROXY}; echo warp > route.txt; else echo "warp-failed, using $([ -n "\${YTDLP_PROXY:-}" ] && echo proxy || echo direct)" > route.txt; fi`,
+  `  if warp_ok; then export YTDLP_PROXY=${WARP_PROXY}; echo warp > route.txt; else echo "warp-failed, using $([ -n "\${YTDLP_PROXY:-}" ] && echo proxy || echo direct)" > route.txt; tail -n 5 warp.log 2>/dev/null | sed 's/^/WARP: /'; fi`,
   "}",
   // "|| true": a broken tunnel must never fail the job, it only loses the WARP route.
   `warp_up || true; echo "ROUTE: $(cat route.txt 2>/dev/null || echo "$([ -n "\${YTDLP_PROXY:-}" ] && echo proxy || echo direct)")"`,
