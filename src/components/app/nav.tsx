@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, FolderKanban, LayoutDashboard, Link2, Scissors } from "lucide-react";
+import { CalendarClock, ChartColumn, FolderKanban, LayoutDashboard, Link2, Scissors } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/stats", label: "Stats", icon: ChartColumn },
   { href: "/clips", label: "Clips", icon: Scissors },
   { href: "/posts", label: "Posts", icon: CalendarClock },
   { href: "/accounts", label: "Accounts", icon: Link2 },

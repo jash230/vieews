@@ -26,7 +26,7 @@ const TT_ERRORS: Record<string, string> = {
     "TikTok hasn't audited Vieews yet, so it only accepts posts from private accounts. In the TikTok app, turn on Settings and privacy → Privacy → Private account, then post with “Only me”.",
 };
 
-async function ttJson(res: Response, what: string) {
+export async function ttJson(res: Response, what: string) {
   const json = await res.json().catch(() => ({}));
   const code = json.error?.code;
   if (!res.ok || (code && code !== "ok")) {

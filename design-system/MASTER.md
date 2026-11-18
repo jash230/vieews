@@ -21,7 +21,7 @@ Light only. Tokens live in `src/app/globals.css` (`:root`) and are exposed to Ta
 | brand-teal / brand-olive / brand-tea | `#82A3A1` / `#9FC490` / `#C0DFA1` | **Decoration only**: blobs, loader dots, button lip, highlight marker, tinted icon tiles (`/35`–`/60`). Never text on white (1.5–2.7:1). Fine as text on Prussian (6.5–12:1). |
 | success / warning / destructive | `#15803D` / `#B45309` / `#DC2626` | Status text (all ≥4.5:1 on their soft backgrounds) |
 
-Platform brand colors (`--brand-youtube|instagram|tiktok` and the `simple-icons` hex values in the landing orbit) are only for platform marks.
+Platform brand colors (`--brand-youtube|instagram|tiktok` and the `simple-icons` hex values in the landing orbit) are only for platform marks, and for the per-platform segments of the Stats share bars (always with a labeled legend).
 
 ## Type
 Fredoka (`font-display`) for h1/h2, page and card titles, stat numbers and the wordmark. Nunito (`font-sans`) for everything else. Both via next/font, `display: swap`. Scale 12 / 13 / 14 / 16 / 18 / 20 / 28–32 / 48–72 (hero). Weights: 400 body, 600 labels, 700 buttons, Fredoka 600 headings. `tabular-nums` for counts, sizes, durations and progress.
@@ -36,7 +36,7 @@ Radius: 12 (small controls, inputs) / 16 (buttons, tiles) / 24 (cards) / 32 (lan
 - Section saves (project settings): each card saves on its own; a save in one never resets another's unsaved edits.
 - Status: always icon + text (`StatusBadge`), never color alone. In-flight states (publishing, processing) show `Loader` dots.
 - Empty states: floating icon tile + title + one sentence + one action.
-- Nav: five items (Dashboard, Clips, Posts, Accounts, Projects). Plans and AI & API keys live in the user menu (`AccountMenu`). The active item gets `primary-soft` plus an olive pill, and icons wiggle on hover. There is no loading indicator on page moves.
+- Nav: six items (Dashboard, Stats, Clips, Posts, Accounts, Projects). Plans and AI & API keys live in the user menu (`AccountMenu`). The active item gets `primary-soft` plus an olive pill, and icons wiggle on hover. There is no loading indicator on page moves.
 
 ## Loading
 - Route loads: no `loading.tsx` and no page-move animation (the user dislikes them). Pages stream their own Suspense skeletons.
@@ -58,7 +58,9 @@ Tokens: `--ease-spring` (overshoot, for presses and pops) and `--ease-out` (entr
 - `src/components/ui/loader.tsx`: adapted from "Loader" by my, trimmed to 4 variants.
 - `src/components/ui/prompt-box.tsx`: adapted from "Chatgpt Prompt Input" by jahed: the rounded 28px composer, tools left, send right. Trimmed to one link field, no Radix.
 
-The first two use `motion`.
+- `src/components/ui/stat-card.tsx`: adapted from "Stat Card" by ravikatiyar162: the count-up number; trend chip swapped for a hint line, instant under reduced motion.
+
+The first two and the stat card use `motion`.
 
 ## Layout
 Mobile-first. From 768px, a 240px left sidebar holds the logo, the project menu, the nav and the user menu. Below 768px, a 56px top bar holds the project menu, the Copilot button and the user menu, with the nav as a sideways-scrolling row under it. Content `max-w-6xl`, gutters 16 / 24 / 40px.
