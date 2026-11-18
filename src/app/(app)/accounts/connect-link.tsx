@@ -25,7 +25,7 @@ export function ConnectLink({ href, label, platformLabel, primary }: { href: str
         if (opening) return e.preventDefault();
         if (!e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) setOpening(true);
       }}
-      className={cn(buttonVariants({ variant: primary ? "primary" : "secondary" }), "w-full", opening && "pointer-events-none opacity-80")}
+      className={cn(buttonVariants({ variant: primary ? "primary" : "secondary" }), "w-full whitespace-normal py-2.5 text-center text-balance", opening && "pointer-events-none opacity-80")}
     >
       {opening ? (
         <>
