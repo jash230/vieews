@@ -321,10 +321,11 @@ export function Composer({
   const [yt, setYt] = useState<YouTubeOptions>({ title: initialClip?.title.slice(0, 100) ?? "", privacy: "public", tags: [] });
   const [ig, setIg] = useState<InstagramOptions>({ format: "reel", shareToFeed: true });
   const [tt, setTt] = useState<TikTokOptions>({
+    // TikTok audit rule: no preselected privacy, interactions off until the creator turns them on.
     privacyLevel: "",
-    disableComment: false,
-    disableDuet: false,
-    disableStitch: false,
+    disableComment: true,
+    disableDuet: true,
+    disableStitch: true,
     brandOrganic: false,
     brandedContent: false,
     isAigc: false,
