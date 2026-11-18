@@ -110,6 +110,14 @@ describe("render scripts", () => {
     expect(explainFailure("prepare", "ERROR: Sign in to confirm you’re not a bot")).toMatch(/blocked/);
     expect(explainFailure("prepare", "curl: (63) Maximum file size exceeded")).toMatch(/4 GB/);
     expect(explainFailure("prepare", "curl: (22) The requested URL returned error: 403")).toMatch(/public/);
+    // Every YouTube log says "Downloading webpage"; that must not read as age-restricted.
+    const yt = "[youtube] v9QtM6qnG50: Downloading webpage\n[info] Writing video metadata as JSON to: src.mp4.info.json\n";
+    expect(explainFailure("prepare", `${yt}ERROR: unable to download video data: HTTP Error 403: Forbidden`)).toMatch(/blocked/);
+    expect(explainFailure("prepare", `${yt}ERROR: [youtube] x: Sign in to confirm your age. This video may be inappropriate for some users.`)).toMatch(/age-restricted/);
+  });
+
+  it("retries the first link download once", () => {
+    expect(prepareScript({ kind: "link", url: "https://youtu.be/x" })).toContain("dl || { sleep 3; dl; }");
   });
 
   it("downloads only the clipped moment of a link, at 720p, and cuts uploads from src.mp4", () => {

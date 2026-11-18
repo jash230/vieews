@@ -177,10 +177,12 @@ async function setStatus(jobId: string, status: ClipJobStatus) {
 export function explainFailure(phase: string, log: string): string {
   if (/TOO_LONG|does not pass filter/i.test(log)) return "This video is over 2 hours. Clip a shorter one, or trim it and upload the file.";
   if (/curl: \(63\)|larger than max-filesize/i.test(log)) return "This file is over 4 GB. Export a smaller version and try again.";
-  if (/confirm you.?re not a bot|Sign in to confirm|HTTP Error 429|blocked/i.test(log)) {
+  // yt-dlp's 403 comes after the video was found, so the site refused our server, not the link.
+  if (/confirm you.?re not a bot|HTTP Error 4(03|29)|blocked/i.test(log)) {
     return "The site blocked the download from our servers. Download the video yourself and upload the file instead.";
   }
-  if (/Private video|members-only|This video is unavailable|Video unavailable|login required|age/i.test(log)) {
+  // Never a bare "age": every YouTube log has "Downloading webpage".
+  if (/Private video|members-only|This video is unavailable|Video unavailable|login required|confirm your age|age.restricted/i.test(log)) {
     return "This video is private, age-restricted or unavailable. Use a public link, or upload the file.";
   }
   if (/Unsupported URL/i.test(log)) return "That link isn't a video we can open. Try a direct video link or upload the file.";

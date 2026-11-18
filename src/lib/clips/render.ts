@@ -70,9 +70,11 @@ export function prepareScript(source: Source, haveTranscript = false): string {
     source.kind === "link"
       ? [
           // "<=?" lets a direct file link through when its length is unknown; ffprobe below enforces the cap.
-          `${YTDLP} --match-filter ${shq(`duration <=? ${MAX_SOURCE_S}`)} --max-filesize ${MAX_SOURCE_BYTES} \\`,
+          `dl() { ${YTDLP} --match-filter ${shq(`duration <=? ${MAX_SOURCE_S}`)} --max-filesize ${MAX_SOURCE_BYTES} \\`,
           // A ~64k track is plenty for transcription and half the bytes. The saved lookup (src.mp4.info.json) spares each clip ~10s of asking the site again.
-          `  -f ${shq("ba[abr<=70]/ba/b")} --write-info-json --print-to-file ${shq("%(title)s")} title.txt -o src.mp4 ${shq(source.url)}`,
+          `  -f ${shq("ba[abr<=70]/ba/b")} --write-info-json --print-to-file ${shq("%(title)s")} title.txt -o src.mp4 ${shq(source.url)}; }`,
+          // YouTube sometimes 403s the first file request through WARP (seen 2026-11-18); the same command passed on a rerun, so retry once with a fresh lookup.
+          `dl || { sleep 3; dl; }`,
           `[ -s src.mp4 ] || { echo "DOWNLOAD_FAILED: nothing was downloaded (too long, too big, private, or blocked)"; exit 3; }`,
         ]
       : [`curl -fsSL --retry 3 --max-filesize ${MAX_SOURCE_BYTES} -o src.mp4 ${shq(source.url)}`];
