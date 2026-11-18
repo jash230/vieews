@@ -13,7 +13,25 @@ export const SANDBOX_USD_PER_MIN = 0.01;
 
 export const sandboxNameFor = (jobId: string) => `clip-${jobId}`;
 
+/** Longer than any job can run (its phase waits top out near 100 minutes), so nothing older is still in use. */
+const STALE_MS = 3 * 60 * 60_000;
+
+/**
+ * Deletes sandboxes (and their snapshots) older than STALE_MS: leftovers from jobs whose cleanup never
+ * ran, or from scripts. Hobby caps snapshot storage, and once it's full no new job can start. Never throws.
+ */
+export async function pruneStaleSandboxes(now = Date.now()): Promise<void> {
+  try {
+    const { sandboxes } = await Sandbox.list({ sortBy: "createdAt", sortOrder: "asc", limit: 50 });
+    const stale = sandboxes.filter((s) => now - s.createdAt > STALE_MS);
+    await Promise.all(stale.map((s) => destroyJobSandbox(s.name)));
+  } catch (err) {
+    console.error("pruneStaleSandboxes failed", err);
+  }
+}
+
 export async function createJobSandbox(jobId: string): Promise<Sandbox> {
+  await pruneStaleSandboxes();
   const name = sandboxNameFor(jobId);
   const sandbox = await Sandbox.getOrCreate({
     name,
