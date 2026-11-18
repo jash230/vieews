@@ -116,15 +116,17 @@ describe("render scripts", () => {
     expect(explainFailure("prepare", `${yt}ERROR: [youtube] x: Sign in to confirm your age. This video may be inappropriate for some users.`)).toMatch(/age-restricted/);
   });
 
-  it("takes only the last 2 hours of a live or over-2-hour link, and never records a live one forever", () => {
+  it("takes only the last 1.5 hours of a live or over-2-hour link, and never records a live one forever", () => {
     const link = prepareScript({ kind: "link", url: "https://youtu.be/x" });
     // The first download skips live streams (no length, so "<=?" alone let them through and it recorded forever).
     expect(link).toContain("--match-filter '!is_live & duration <=? 7200'");
     expect(link).toContain('end=$(( rel > 0 ? $(date +%s) - rel : 0 ))');
-    expect(link).toContain("start=$(( end > 7200 ? end - 7200 : 0 ))");
+    expect(link).toContain("start=$(( end > 5400 ? end - 5400 : 0 ))");
     expect(link).toContain(`timeout 25m ./yt-dlp`);
     expect(link).toContain(`--live-from-start --download-sections "*$start-$end"`);
     expect(link).toContain(`echo "$start" > offset.txt`);
+    // The first download's skip line must not read as "too long" when the tail download fails.
+    expect(explainFailure("prepare", "[download] Live stream does not pass filter (!is_live), skipping ..\nDOWNLOAD_FAILED: couldn't download the last 1.5 hours")).toMatch(/Couldn't download/);
   });
 
   it("retries the first link download once", () => {

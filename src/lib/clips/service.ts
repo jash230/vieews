@@ -196,7 +196,8 @@ async function setStatus(jobId: string, status: ClipJobStatus) {
 
 /** Turns the end of a failed phase's log into something a person can act on. */
 export function explainFailure(phase: string, log: string): string {
-  if (/TOO_LONG|does not pass filter/i.test(log)) return "This video is over 2 hours. Clip a shorter one, or trim it and upload the file.";
+  // Not "does not pass filter": every live or over-2-hour link logs it before its tail download.
+  if (/TOO_LONG/.test(log)) return "This video is over 2 hours. Clip a shorter one, or trim it and upload the file.";
   if (/curl: \(63\)|larger than max-filesize/i.test(log)) return "This file is over 4 GB. Export a smaller version and try again.";
   // yt-dlp's 403 comes after the video was found, so the site refused our server, not the link.
   if (/confirm you.?re not a bot|HTTP Error 4(03|29)|blocked/i.test(log)) {
@@ -226,7 +227,7 @@ async function cachedTranscript(job: ClipJobRow): Promise<Pick<ClipJobRow, "tran
     .eq("source_url", job.source_url)
     .neq("id", job.id)
     .not("transcript", "is", null)
-    // A live or over-2-hour video was cut to its last 2 hours, which move while it's live.
+    // A live or over-2-hour video was cut to its last 1.5 hours, which move while it's live.
     .is("source_offset_s", null)
     .order("created_at", { ascending: false })
     .limit(1)

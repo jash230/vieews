@@ -8,6 +8,9 @@ export const WORKDIR = "/vercel/sandbox/clip";
 /** Longest source video accepted, in seconds. */
 export const MAX_SOURCE_S = 2 * 60 * 60;
 
+/** How much of a live or over-2-hour link is clipped: its last 1.5 hours. */
+export const TAIL_S = 90 * 60;
+
 /** Each clip must fit Supabase Free's 50 MB file cap, with headroom. */
 export const CLIP_MAX_BYTES = 45 * 1024 * 1024;
 
@@ -79,16 +82,17 @@ export function prepareScript(source: Source, haveTranscript = false): string {
           `  -f ${shq(AUDIO)} --write-info-json --print-to-file ${shq("%(title)s")} title.txt -o src.mp4 ${shq(source.url)}; }`,
           // YouTube sometimes 403s the first file request through WARP (seen 2026-11-18); the same command passed on a rerun, so retry once with a fresh lookup.
           `dl || { sleep 3; dl; }`,
-          // Live, or over 2 hours: take the last 2 hours only. offset.txt holds where they start in the full video, so renders fetch the right moment.
+          // Live, or over 2 hours: take the last 1.5 hours only. offset.txt holds where they start in the full video, so renders fetch the right moment.
           `if [ ! -s src.mp4 ]; then`,
           `  ${YTDLP} --live-from-start -O ${shq("%(is_live)s %(duration|0)d %(release_timestamp|0)d")} -O ${shq("%(title)s")} ${shq(source.url)} > meta.txt`,
           `  read -r live dur rel < meta.txt; sed -n 2p meta.txt > title.txt`,
           // A live stream's end is "now", counted from when it went live.
           `  if [ "$live" = True ]; then end=$(( rel > 0 ? $(date +%s) - rel : 0 )); else end=$dur; fi`,
           `  [ "$end" -gt 0 ] || { echo "DOWNLOAD_FAILED: couldn't tell how long this video is"; exit 3; }`,
-          `  start=$(( end > ${MAX_SOURCE_S} ? end - ${MAX_SOURCE_S} : 0 ))`,
+          `  start=$(( end > ${TAIL_S} ? end - ${TAIL_S} : 0 ))`,
           // timeout: a live download must never hang the job until the sandbox dies.
-          `  timeout 25m ${YTDLP} --live-from-start --download-sections "*$start-$end" --max-filesize ${MAX_SOURCE_BYTES} -f ${shq(AUDIO)} -o src.mp4 ${shq(source.url)}`,
+          `  timeout 25m ${YTDLP} --live-from-start --download-sections "*$start-$end" --max-filesize ${MAX_SOURCE_BYTES} -f ${shq(AUDIO)} -o src.mp4 ${shq(source.url)} \\`,
+          `    || { echo "DOWNLOAD_FAILED: couldn't download the last 1.5 hours"; exit 3; }`,
           `  echo "$start" > offset.txt`,
           `fi`,
           `[ -s src.mp4 ] || { echo "DOWNLOAD_FAILED: nothing was downloaded (too long, too big, private, or blocked)"; exit 3; }`,
