@@ -158,8 +158,8 @@ describe("render scripts", () => {
     expect(detachedCommand("prepare")[1]).toContain("echo $? > prepare.done");
   });
 
-  it("centre-crops to 9:16, scales to 1080x1920 and burns captions", () => {
-    expect(clipFilter("clip-0.ass")).toBe("crop=w=min(iw\\,ih*9/16):h=min(ih\\,iw*16/9),scale=1080:1920:flags=lanczos,setsar=1,subtitles=clip-0.ass:fontsdir=fonts");
+  it("crops wide video only to 4:5, letterboxes it in 1080x1920 and burns captions", () => {
+    expect(clipFilter("clip-0.ass")).toBe("crop=w=min(iw\\,ih*4/5):h=min(ih\\,iw*16/9),scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,subtitles=clip-0.ass:fontsdir=fonts");
     const script = renderScript(2, 61.5, 101.5);
     expect(script).toContain("-ss 61.500 -i src.mp4 -t 40.000");
     expect(script).toContain("clip-2.mp4");

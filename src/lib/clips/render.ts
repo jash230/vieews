@@ -165,11 +165,15 @@ export function videoKbps(durationS: number): number {
   return Math.max(800, Math.min(6000, totalKbps - 160));
 }
 
-/** The -vf chain: centre-crop to 9:16 (or keep an already-vertical frame), scale to 1080x1920, burn captions. */
+/**
+ * The -vf chain: a vertical frame fills 1080x1920; a wider one is centre-cropped only to 4:5 and
+ * letterboxed with black bars, so less of it is cut away. Then captions are burned in.
+ */
 export function clipFilter(assFile: string): string {
   return [
-    "crop=w=min(iw\\,ih*9/16):h=min(ih\\,iw*16/9)",
-    "scale=1080:1920:flags=lanczos",
+    "crop=w=min(iw\\,ih*4/5):h=min(ih\\,iw*16/9)",
+    "scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
+    "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
     "setsar=1",
     `subtitles=${assFile}:fontsdir=fonts`,
   ].join(",");
