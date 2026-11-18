@@ -7,7 +7,7 @@ export const MODELS = {
   /** One-shot extraction, e.g. drafting a project from a store listing. */
   draft: "claude-haiku-5-5",
   /** Picking viral moments from a long transcript. */
-  clips: "claude-haiku-5-5",
+  clips: "claude-sonnet-5-5",
 } as const;
 
 interface Price {
