@@ -226,6 +226,8 @@ async function cachedTranscript(job: ClipJobRow): Promise<Pick<ClipJobRow, "tran
     .eq("source_url", job.source_url)
     .neq("id", job.id)
     .not("transcript", "is", null)
+    // A live or over-2-hour video was cut to its last 2 hours, which move while it's live.
+    .is("source_offset_s", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -279,7 +281,9 @@ export async function startTranscribe(jobId: string): Promise<void> {
   const sandbox = await jobSandbox(job.sandbox_name!);
   const duration = Number((await readText(sandbox, "duration.txt")).trim()) || null;
   const title = (await readText(sandbox, "title.txt")).trim().split("\n")[0]?.slice(0, 200) || null;
-  await patchJob(jobId, { status: "transcribing", source_duration_s: duration, source_title: title });
+  // Only a live or over-2-hour link writes offset.txt (see prepareScript).
+  const offset = job.source_asset_id ? "" : (await readText(sandbox, "offset.txt")).trim();
+  await patchJob(jobId, { status: "transcribing", source_duration_s: duration, source_title: title, ...(offset ? { source_offset_s: Number(offset) } : {}) });
   await startPhase(sandbox, "transcribe", transcribeScript(), { DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY ?? "" });
 }
 
@@ -341,7 +345,8 @@ export async function startRender(jobId: string, clipId: string, n: number): Pro
   const ass = buildAss(wordsInRange(job.transcript ?? [], clip.start_s, clip.end_s));
   // A link job has only the audio in the sandbox, so the render fetches this moment's picture itself.
   const link = job.source_asset_id ? undefined : (job.source_url ?? undefined);
-  await startPhase(await jobSandbox(job.sandbox_name!), `render-${n}`, renderScript(n, clip.start_s, clip.end_s, link), link ? linkEnv() : undefined, [{ path: `clip-${n}.ass`, content: ass }]);
+  const off = link ? Number(job.source_offset_s ?? 0) : 0;
+  await startPhase(await jobSandbox(job.sandbox_name!), `render-${n}`, renderScript(n, clip.start_s + off, clip.end_s + off, link), link ? linkEnv() : undefined, [{ path: `clip-${n}.ass`, content: ass }]);
 }
 
 /** Uploads a rendered clip and its poster frame to storage, and links it to the clip. */

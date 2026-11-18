@@ -150,6 +150,8 @@ export interface ClipJobRow {
   target_length_s: number;
   source_title: string | null;
   source_duration_s: number | null;
+  /** Where the clipped part starts in the linked video: set when a live or over-2-hour video was cut to its last 2 hours. */
+  source_offset_s: number | null;
   transcript: TranscriptWord[] | null;
   sandbox_name: string | null;
   clips_total: number;

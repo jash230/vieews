@@ -56,6 +56,9 @@ const WARP_UP = [
 ];
 
 /** yt-dlp with the flags every call shares. YTDLP_PROXY comes from the env (or WARP_UP) so its credentials never land in the script; YouTube refuses Vercel's IPs without one. */
+/** Audio for transcription. */
+const AUDIO = "ba[abr<=70]/ba/b";
+
 const YTDLP =`./yt-dlp \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"} --no-playlist --no-progress --restrict-filenames --js-runtimes node -N 4`;
 
 /**
@@ -70,11 +73,24 @@ export function prepareScript(source: Source, haveTranscript = false): string {
     source.kind === "link"
       ? [
           // "<=?" lets a direct file link through when its length is unknown; ffprobe below enforces the cap.
-          `dl() { ${YTDLP} --match-filter ${shq(`duration <=? ${MAX_SOURCE_S}`)} --max-filesize ${MAX_SOURCE_BYTES} \\`,
+          // A live stream has no length either, and would record forever: the filter skips it here and the tail download below takes it.
+          `dl() { ${YTDLP} --match-filter ${shq(`!is_live & duration <=? ${MAX_SOURCE_S}`)} --max-filesize ${MAX_SOURCE_BYTES} \\`,
           // A ~64k track is plenty for transcription and half the bytes. The saved lookup (src.mp4.info.json) spares each clip ~10s of asking the site again.
-          `  -f ${shq("ba[abr<=70]/ba/b")} --write-info-json --print-to-file ${shq("%(title)s")} title.txt -o src.mp4 ${shq(source.url)}; }`,
+          `  -f ${shq(AUDIO)} --write-info-json --print-to-file ${shq("%(title)s")} title.txt -o src.mp4 ${shq(source.url)}; }`,
           // YouTube sometimes 403s the first file request through WARP (seen 2026-11-18); the same command passed on a rerun, so retry once with a fresh lookup.
           `dl || { sleep 3; dl; }`,
+          // Live, or over 2 hours: take the last 2 hours only. offset.txt holds where they start in the full video, so renders fetch the right moment.
+          `if [ ! -s src.mp4 ]; then`,
+          `  ${YTDLP} --live-from-start -O ${shq("%(is_live)s %(duration|0)d %(release_timestamp|0)d")} -O ${shq("%(title)s")} ${shq(source.url)} > meta.txt`,
+          `  read -r live dur rel < meta.txt; sed -n 2p meta.txt > title.txt`,
+          // A live stream's end is "now", counted from when it went live.
+          `  if [ "$live" = True ]; then end=$(( rel > 0 ? $(date +%s) - rel : 0 )); else end=$dur; fi`,
+          `  [ "$end" -gt 0 ] || { echo "DOWNLOAD_FAILED: couldn't tell how long this video is"; exit 3; }`,
+          `  start=$(( end > ${MAX_SOURCE_S} ? end - ${MAX_SOURCE_S} : 0 ))`,
+          // timeout: a live download must never hang the job until the sandbox dies.
+          `  timeout 25m ${YTDLP} --live-from-start --download-sections "*$start-$end" --max-filesize ${MAX_SOURCE_BYTES} -f ${shq(AUDIO)} -o src.mp4 ${shq(source.url)}`,
+          `  echo "$start" > offset.txt`,
+          `fi`,
           `[ -s src.mp4 ] || { echo "DOWNLOAD_FAILED: nothing was downloaded (too long, too big, private, or blocked)"; exit 3; }`,
         ]
       : [`curl -fsSL --retry 3 --max-filesize ${MAX_SOURCE_BYTES} -o src.mp4 ${shq(source.url)}`];
@@ -92,7 +108,8 @@ export function prepareScript(source: Source, haveTranscript = false): string {
       : [
           ...download,
           "ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 src.mp4 > duration.txt",
-          `awk '{ if ($1 > ${MAX_SOURCE_S}) { print "TOO_LONG: the video is over 2 hours"; exit 4 } }' duration.txt`,
+          // +5s: a 2-hour tail probes a few ms over 2 hours.
+          `awk '{ if ($1 > ${MAX_SOURCE_S + 5}) { print "TOO_LONG: the video is over 2 hours"; exit 4 } }' duration.txt`,
           "ffmpeg -y -v error -i src.mp4 -vn -ac 1 -ar 16000 -b:a 48k audio.mp3",
         ]),
   ].join("\n");
@@ -128,6 +145,7 @@ export function clipFilter(assFile: string): string {
 /**
  * Cuts one clip to clip-<n>.mp4 with captions from clip-<n>.ass, plus a poster frame clip-<n>.jpg.
  * An upload is cut from src.mp4. A link (`linkUrl`) has only its audio on disk, so just this moment is downloaded first, at 720p.
+ * For a link, startS/endS are times in the full video (a live or long video's offset already added).
  */
 export function renderScript(n: number, startS: number, endS: number, linkUrl?: string): string {
   const dur = Math.max(0.5, endS - startS);
@@ -140,7 +158,7 @@ export function renderScript(n: number, startS: number, endS: number, linkUrl?: 
           ...WARP_UP,
           // "res" is the shorter side, so a vertical video keeps 720 across instead of 720 tall.
           // No --force-keyframes-at-cuts: measured on YouTube, the plain cut already starts within a frame of startS, and forcing re-encodes every clip twice.
-          `get() { ${YTDLP} -f ${shq("bv*+ba/b")} -S res:720 --download-sections ${shq(`*${startS.toFixed(3)}-${endS.toFixed(3)}`)} --merge-output-format mp4 -o ${input} "$@"; }`,
+          `get() { ${YTDLP} --live-from-start -f ${shq("bv*+ba/b")} -S res:720 --download-sections ${shq(`*${startS.toFixed(3)}-${endS.toFixed(3)}`)} --merge-output-format mp4 -o ${input} "$@"; }`,
           `get --load-info-json src.mp4.info.json || get ${shq(linkUrl)}`,
           `[ -s ${input} ] || { echo "DOWNLOAD_FAILED: this moment could not be downloaded"; exit 3; }`,
         ]

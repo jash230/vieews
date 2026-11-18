@@ -116,6 +116,17 @@ describe("render scripts", () => {
     expect(explainFailure("prepare", `${yt}ERROR: [youtube] x: Sign in to confirm your age. This video may be inappropriate for some users.`)).toMatch(/age-restricted/);
   });
 
+  it("takes only the last 2 hours of a live or over-2-hour link, and never records a live one forever", () => {
+    const link = prepareScript({ kind: "link", url: "https://youtu.be/x" });
+    // The first download skips live streams (no length, so "<=?" alone let them through and it recorded forever).
+    expect(link).toContain("--match-filter '!is_live & duration <=? 7200'");
+    expect(link).toContain('end=$(( rel > 0 ? $(date +%s) - rel : 0 ))');
+    expect(link).toContain("start=$(( end > 7200 ? end - 7200 : 0 ))");
+    expect(link).toContain(`timeout 25m ./yt-dlp`);
+    expect(link).toContain(`--live-from-start --download-sections "*$start-$end"`);
+    expect(link).toContain(`echo "$start" > offset.txt`);
+  });
+
   it("retries the first link download once", () => {
     expect(prepareScript({ kind: "link", url: "https://youtu.be/x" })).toContain("dl || { sleep 3; dl; }");
   });

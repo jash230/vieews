@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { instagram } from "@/lib/platforms/instagram";
 import { chunkRange, photoPostBody, tiktok, tiktokChunkPlan } from "@/lib/platforms/tiktok";
-import { nextOffset, youtube, YT_CHUNK_BYTES } from "@/lib/platforms/youtube";
+import { nextOffset, shortsDescription, youtube, YT_CHUNK_BYTES } from "@/lib/platforms/youtube";
 import { fakeCtx, json, mockFetch, rangeHandler } from "./helpers";
 
 const MB = 1024 * 1024;
@@ -44,6 +44,16 @@ describe("YouTube", () => {
     expect(init.status).not.toHaveProperty("containsSyntheticMedia");
     const puts = calls.filter((c) => c.url.includes("session") && c.init.method === "PUT").map((c) => new Headers(c.init.headers).get("content-range"));
     expect(puts).toEqual([`bytes */${size}`, `bytes 0-${YT_CHUNK_BYTES - 1}/${size}`, `bytes ${YT_CHUNK_BYTES}-${2 * YT_CHUNK_BYTES - 1}/${size}`, `bytes ${2 * YT_CHUNK_BYTES}-${size - 1}/${size}`]);
+  });
+
+  it("tags vertical videos up to 3 min as #Shorts", () => {
+    const clip = { width: 1080, height: 1920, duration_s: 45 };
+    expect(shortsDescription("Hi", clip)).toBe("Hi\n\n#Shorts");
+    expect(shortsDescription("", clip)).toBe("#Shorts");
+    expect(shortsDescription("Hi #shorts", clip)).toBe("Hi #shorts");
+    expect(shortsDescription("Hi", { width: 1920, height: 1080, duration_s: 45 })).toBe("Hi");
+    expect(shortsDescription("Hi", { ...clip, duration_s: 600 })).toBe("Hi");
+    expect(shortsDescription("Hi", {})).toBe("Hi");
   });
 
   it("sends the AI disclosure when set", async () => {

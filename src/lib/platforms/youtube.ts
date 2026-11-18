@@ -2,6 +2,7 @@ import { env } from "@/lib/env";
 import { fetchRange, form, scopesFrom } from "./http";
 import { expectOk, expiresSoon, PlatformError, type PlatformAdapter } from "./types";
 import { pkceChallenge } from "@/lib/crypto";
+import { LIMITS } from "./limits";
 
 const SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"];
 /** Must be a multiple of 256 KiB. */
@@ -98,7 +99,7 @@ export const youtube: PlatformAdapter = {
         body: JSON.stringify({
           snippet: {
             title: opts.title.trim(),
-            description: opts.description ?? ctx.caption,
+            description: shortsDescription(opts.description ?? ctx.caption, ctx.media),
             tags: opts.tags?.length ? opts.tags : undefined,
             categoryId: "22",
           },
@@ -123,6 +124,13 @@ export const youtube: PlatformAdapter = {
     };
   },
 };
+
+/** YouTube has no "upload as Short" flag: vertical/square videos up to 3 min become Shorts, and #Shorts nudges the classifier. */
+export function shortsDescription(description: string, media: { width?: number | null; height?: number | null; duration_s?: number | null }): string {
+  const isShort = !!media.width && !!media.height && media.height >= media.width && (media.duration_s ?? Infinity) <= LIMITS.youtube.shortsMaxDurationS;
+  if (!isShort || /#shorts\b/i.test(description)) return description;
+  return description ? `${description}\n\n#Shorts` : "#Shorts";
+}
 
 /** Uploads in chunks, resuming from whatever YouTube already has (so step retries continue). */
 export async function uploadResumable(uploadUrl: string, total: number, mime: string, mediaUrl: () => Promise<string>): Promise<string> {
