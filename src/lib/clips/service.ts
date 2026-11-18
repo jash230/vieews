@@ -1,7 +1,7 @@
 import "server-only";
 import { createMediaAsset, finalizeMediaAsset, getMediaAsset, purgeMediaFile, signedReadUrl, signedReadUrls, thumbnailPathFor } from "@/lib/media/service";
 import { MEDIA_BUCKET, supabaseAdmin } from "@/lib/supabase/admin";
-import type { ClipJobRow, ClipJobStatus, ClipRow, MediaAssetRow } from "@/lib/types";
+import { CLIP_CANCELLED as CANCELLED, type ClipJobRow, type ClipJobStatus, type ClipRow, type MediaAssetRow } from "@/lib/types";
 import { assertWithinPlan, PLANS } from "@/lib/billing/plans";
 import { clipBudgetSpent, CLIP_USD_PER_VIDEO, recordUsage } from "@/lib/usage/service";
 import { buildAss, wordsInRange } from "./captions";
@@ -156,11 +156,32 @@ export async function discardClip(userId: string, clipId: string): Promise<{ job
   return { jobId: data.job_id as string };
 }
 
+/** Stops a running job: marks it cancelled and deletes its sandbox, so the workflow's next step ends it (see loadJob). */
+export async function cancelClipJob(userId: string, jobId: string): Promise<void> {
+  const { data, error } = await db()
+    .from("clip_jobs")
+    .update({ status: "failed", error: CANCELLED, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("id", jobId)
+    .not("status", "in", "(ready,failed)")
+    .select("sandbox_name, created_at, project_id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ClipError("This job already finished.");
+  if (data.sandbox_name) {
+    await destroyJobSandbox(data.sandbox_name);
+    const minutes = (Date.now() - new Date(data.created_at).getTime()) / 60_000;
+    void recordUsage({ userId, projectId: data.project_id, kind: "video", provider: "vercel-sandbox", units: minutes, costUsd: minutes * SANDBOX_USD_PER_MIN, ref: "clip-sandbox" });
+  }
+}
+
 // ---------------------------------------------------------------- the pipeline, for workflow steps
 
 async function loadJob(jobId: string): Promise<ClipJobRow> {
   const { data, error } = await db().from("clip_jobs").select("*").eq("id", jobId).single();
   if (error || !data) throw new ClipError("This clip job no longer exists.");
+  // A ClipError is fatal, so a cancelled job's workflow stops at its next step; finishJob then leaves the row alone.
+  if (data.error === CANCELLED) throw new ClipError(CANCELLED);
   return data as ClipJobRow;
 }
 

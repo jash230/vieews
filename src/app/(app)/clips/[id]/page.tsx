@@ -12,7 +12,7 @@ import { CLEANUP_RULES } from "@/lib/media/cleanup";
 import type { ClipJobRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ClipJobBadge, isRunning, STEPS } from "../clip-status";
-import { ClipJobRefresh, DiscardClipButton } from "./clip-actions";
+import { CancelClipJobButton, ClipJobRefresh, DiscardClipButton } from "./clip-actions";
 
 export const metadata = { title: "Clips" };
 
@@ -49,7 +49,7 @@ async function ClipJob({ params }: Pick<PageProps<"/clips/[id]">, "params">) {
         <div className="min-w-0">
           <h1 className="font-display text-[26px] font-semibold tracking-tight sm:text-[30px]">{job.source_title ?? "Your clips"}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <ClipJobBadge status={job.status} />
+            <ClipJobBadge status={job.status} error={job.error} />
             {job.source_duration_s ? <span>{fmtTime(Number(job.source_duration_s))} video</span> : null}
             {job.source_url && (
               <a href={job.source_url} target="_blank" rel="noreferrer noopener" title={job.source_url} className="max-w-[18rem] truncate underline-offset-2 hover:underline">
@@ -111,7 +111,10 @@ function Progress({ job }: { job: Omit<ClipJobRow, "transcript"> }) {
           );
         })}
       </ol>
-      <p className="mt-4 text-xs text-muted-foreground">You can leave this page. The clips keep rendering and will be here when you come back.</p>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">You can leave this page. The clips keep rendering and will be here when you come back.</p>
+        <CancelClipJobButton jobId={job.id} />
+      </div>
     </Card>
   );
 }

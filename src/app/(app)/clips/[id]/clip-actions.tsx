@@ -1,11 +1,11 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
-import { clipJobProgressAction, discardClipAction } from "../../actions";
+import { cancelClipJobAction, clipJobProgressAction, discardClipAction } from "../../actions";
 
 /** Refreshes the page whenever the job moves on (a new step, or another clip rendered). */
 export function ClipJobRefresh({ jobId, initial, everyMs = 4000 }: { jobId: string; initial: string; everyMs?: number }) {
@@ -48,6 +48,29 @@ export function DiscardClipButton({ clipId, title }: { clipId: string; title: st
     >
       {!pending && <Trash2 aria-hidden />}
       Discard
+    </Button>
+  );
+}
+
+export function CancelClipJobButton({ jobId }: { jobId: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      variant="ghost"
+      loading={pending}
+      className="hover:bg-destructive-soft hover:text-destructive"
+      onClick={() => {
+        if (!confirm("Cancel this job? Nothing is clipped and you'd have to start over.")) return;
+        start(async () => {
+          const res = await cancelClipJobAction(jobId);
+          if (!res.ok) return void toast.error("Couldn't cancel the job", { description: res.error });
+          router.refresh();
+        });
+      }}
+    >
+      {!pending && <X aria-hidden />}
+      Cancel
     </Button>
   );
 }

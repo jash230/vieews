@@ -2,7 +2,7 @@ import { CheckCircle2, ChevronRight, XCircle } from "lucide-react";
 import Link from "next/link";
 import { LocalTime } from "@/components/app/local-time";
 import { Loader } from "@/components/ui/loader";
-import type { ClipJobRow, ClipJobStatus } from "@/lib/types";
+import { CLIP_CANCELLED, type ClipJobRow, type ClipJobStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<ClipJobStatus, { label: string; className: string; done?: "ok" | "fail" }> = {
@@ -25,8 +25,8 @@ export const STEPS: { status: ClipJobStatus; label: string }[] = [
   { status: "rendering", label: "Cropping and captioning clips" },
 ];
 
-export function ClipJobBadge({ status, className }: { status: ClipJobStatus; className?: string }) {
-  const s = STATUS[status];
+export function ClipJobBadge({ status, error, className }: { status: ClipJobStatus; error?: string | null; className?: string }) {
+  const s = status === "failed" && error === CLIP_CANCELLED ? { label: "Cancelled", className: "bg-muted text-muted-foreground", done: "fail" as const } : STATUS[status];
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold", s.className, className)}>
       {s.done === "ok" ? <CheckCircle2 className="size-3.5" aria-hidden /> : s.done === "fail" ? <XCircle className="size-3.5" aria-hidden /> : <Loader variant="dots" size={14} label={null} />}
@@ -54,7 +54,7 @@ export function ClipJobItem({ job }: { job: Omit<ClipJobRow, "transcript"> }) {
         <div className="min-w-0 flex-1 space-y-1">
           <p className="truncate text-sm font-semibold">{sourceLabel(job)}</p>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <ClipJobBadge status={job.status} />
+            <ClipJobBadge status={job.status} error={job.error} />
             {job.status === "ready" && <span>{job.clips_done} clips</span>}
             <LocalTime iso={job.created_at} fmt="d MMM, h:mm a" />
           </div>

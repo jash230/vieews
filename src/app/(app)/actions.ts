@@ -6,7 +6,7 @@ import { disconnectAccount, getAccount, getValidAccessToken } from "@/lib/accoun
 import { createMediaAsset, createSignedUpload, createSignedUploadUrl, finalizeMediaAsset, thumbnailPathFor, type NewMediaInput } from "@/lib/media/service";
 import { PlanLimitError } from "@/lib/billing/plans";
 import { approveProposal, declineProposal } from "@/lib/copilot/proposals";
-import { ClipError, createClipJob, discardClip, getClipJob } from "@/lib/clips/service";
+import { cancelClipJob, ClipError, createClipJob, discardClip, getClipJob } from "@/lib/clips/service";
 import { startClipJob } from "@/lib/clips/start";
 import { createApiKey, revokeApiKey } from "@/lib/mcp/api-keys";
 import { getCreatorInfo, type TikTokCreatorInfo } from "@/lib/platforms/tiktok";
@@ -226,6 +226,14 @@ export async function clipJobProgressAction(jobId: string) {
     const job = await getClipJob(userId, jobId);
     if (!job) throw new ClipError("Clip job not found.");
     return { status: job.status, clipsDone: job.clips_done, clipsTotal: job.clips_total, error: job.error };
+  });
+}
+
+export async function cancelClipJobAction(jobId: string) {
+  return run(async (userId) => {
+    await cancelClipJob(userId, jobId);
+    revalidatePath(`/clips/${jobId}`);
+    revalidatePath("/clips");
   });
 }
 

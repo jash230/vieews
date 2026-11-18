@@ -127,6 +127,9 @@ export interface PostTargetRow {
   updated_at: string;
 }
 
+/** The error a job the user cancelled carries; it is stored as "failed" so no migration is needed. */
+export const CLIP_CANCELLED = "You cancelled this job.";
+
 export type ClipJobStatus = "queued" | "downloading" | "transcribing" | "finding" | "rendering" | "ready" | "failed";
 
 /** One spoken word: text, start and end in seconds from the start of the source video. */
