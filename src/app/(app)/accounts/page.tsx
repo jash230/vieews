@@ -117,7 +117,7 @@ async function PlatformCards({ searchParams }: Pick<PageProps<"/accounts">, "sea
                       href={`/api/connect/${platform}`}
                       platformLabel={meta.label}
                       primary={!list.length}
-                      label={list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? `Connect another ${meta.label} account` : `Connect ${meta.label}`}
+                      label={list.some((a) => a.status === "needs_reauth") ? `Reconnect ${meta.label}` : list.length ? "Connect another" : `Connect ${meta.label}`}
                     />
                   ) : (
                     <>
