@@ -89,6 +89,8 @@ export const tiktok: PlatformAdapter = {
       response_type: "code",
       redirect_uri: redirectUri,
       state,
+      // Always show TikTok's consent page, so "Connect another" can pick a different account.
+      disable_auto_auth: "1",
     }).toString();
     return url.toString();
   },
