@@ -120,13 +120,22 @@ describe("render scripts", () => {
     const link = prepareScript({ kind: "link", url: "https://youtu.be/x" });
     // The first download skips live streams (no length, so "<=?" alone let them through and it recorded forever).
     expect(link).toContain("--match-filter '!is_live & duration <=? 7200'");
-    expect(link).toContain('end=$(( rel > 0 ? $(date +%s) - rel : 0 ))');
-    expect(link).toContain("start=$(( end > 5400 ? end - 5400 : 0 ))");
+    // yt-dlp can't cut a live stream, so its last 1.5 hours come from numbered segments.
+    expect(link).toContain(`segs 'ba[ext=m4a][abr<=70]/ba[ext=m4a]' -5400 0 tail.mp4`);
+    expect(link).toContain("start=$(( dur > 5400 ? dur - 5400 : 0 ))");
     expect(link).toContain(`timeout 25m ./yt-dlp`);
-    expect(link).toContain(`--live-from-start --download-sections "*$start-$end"`);
+    expect(link).toContain(`--download-sections "*$start-$dur"`);
     expect(link).toContain(`echo "$start" > offset.txt`);
     // The first download's skip line must not read as "too long" when the tail download fails.
     expect(explainFailure("prepare", "[download] Live stream does not pass filter (!is_live), skipping ..\nDOWNLOAD_FAILED: couldn't download the last 1.5 hours")).toMatch(/Couldn't download/);
+  });
+
+  it("renders a live moment from its segments when yt-dlp can't cut it", () => {
+    const r = renderScript(1, 100, 120, "https://youtu.be/x");
+    expect(r).toContain(`get "$URL" || {`);
+    expect(r).toContain("segs 'bv*[ext=mp4]' 100.000 120.000 v.mp4");
+    expect(r).toContain("-ss ${SS:-0} -i clip-1-src.mp4");
+    expect(renderScript(1, 100, 120)).toContain("-ss 100.000 -i src.mp4");
   });
 
   it("retries the first link download once", () => {
@@ -138,8 +147,8 @@ describe("render scripts", () => {
     expect(link).toContain(`./yt-dlp \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"}`);
     expect(link).toContain("-S res:720 --download-sections '*61.500-101.500'");
     // Reuses the lookup saved at download time, and asks the site again only if that fails.
-    expect(link).toContain("get --load-info-json src.mp4.info.json || get 'https://youtu.be/x'");
-    expect(link).toContain("-ss 0.000 -i clip-2-src.mp4 -t 40.000");
+    expect(link).toContain('get --load-info-json src.mp4.info.json || get "$URL"');
+    expect(link).toContain("-ss ${SS:-0} -i clip-2-src.mp4 -t 40.000");
     const upload = renderScript(2, 61.5, 101.5);
     expect(upload).toContain("-ss 61.500 -i src.mp4 -t 40.000");
     expect(upload).not.toContain("yt-dlp");

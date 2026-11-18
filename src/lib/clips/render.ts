@@ -64,6 +64,26 @@ const AUDIO = "ba[abr<=70]/ba/b";
 
 const YTDLP =`./yt-dlp \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"} --no-playlist --no-progress --restrict-filenames --js-runtimes node -N 4`;
 
+/** A live stream's audio and picture. MP4 only: joined WebM segments don't parse. */
+const LIVE_AUDIO = "ba[ext=m4a][abr<=70]/ba[ext=m4a]";
+const LIVE_VIDEO = "bv*[ext=mp4]";
+
+/**
+ * Bash `segs <format> <start_s> <end_s> <out>`: downloads that stretch of the live stream at $URL (a negative start counts back from now).
+ * yt-dlp can't cut a live stream ("This format cannot be partially downloaded"), so this fetches its numbered segments
+ * (~2s each, counted from when it went live) from the format URL and joins them. Each keeps its time in the stream.
+ * Checks are explicit: `set -e` is off inside a function called with `||`.
+ */
+const LIVE_SEGS = [
+  "segs() {",
+  `  local u a b i; u=$(${YTDLP} --live-from-start -S res:720 -f "$1" -O '%(url)s' "$URL" | tail -n1) && [ -n "$u" ] || return 1`,
+  `  read -r a b < <(curl -sfI \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"} "$u" | tr -d '\\r' | awk -v s="$2" -v e="$3" -F': ' 'tolower($1)=="x-head-time-millis"{m=$2} tolower($1)=="x-head-seqnum"{q=$2} END{if(!q||!m)exit 1; d=m/q/1000; a=s<0?q+int(s/d):int(s/d); b=e<=0?q-1:int(e/d+0.999); if(a<0)a=0; if(b>q-1)b=q-1; print a, b}') || return 1`,
+  // Measured 2026-11-18: 16 at once got 401s after ~1800 segments, which passed when asked again; so 8, and retry on any error.
+  `  curl -sSf --retry 6 --retry-delay 3 --retry-all-errors --parallel --parallel-max 8 \${YTDLP_PROXY:+--proxy "$YTDLP_PROXY"} "$u&sq=[$a-$b]" -o 'seg_#1.part' || return 1`,
+  `  for i in $(seq "$a" "$b"); do cat "seg_$i.part" && rm "seg_$i.part" || return 1; done > "$4"`,
+  "}",
+].join("\n");
+
 /**
  * Installs ffmpeg, the caption font and yt-dlp, downloads the source to src.mp4, and extracts a small
  * mono audio track for transcription. Writes the duration to duration.txt and the title to title.txt.
@@ -84,15 +104,20 @@ export function prepareScript(source: Source, haveTranscript = false): string {
           `dl || { sleep 3; dl; }`,
           // Live, or over 2 hours: take the last 1.5 hours only. offset.txt holds where they start in the full video, so renders fetch the right moment.
           `if [ ! -s src.mp4 ]; then`,
-          `  ${YTDLP} --live-from-start -O ${shq("%(is_live)s %(duration|0)d %(release_timestamp|0)d")} -O ${shq("%(title)s")} ${shq(source.url)} > meta.txt`,
-          `  read -r live dur rel < meta.txt; sed -n 2p meta.txt > title.txt`,
-          // A live stream's end is "now", counted from when it went live.
-          `  if [ "$live" = True ]; then end=$(( rel > 0 ? $(date +%s) - rel : 0 )); else end=$dur; fi`,
-          `  [ "$end" -gt 0 ] || { echo "DOWNLOAD_FAILED: couldn't tell how long this video is"; exit 3; }`,
-          `  start=$(( end > ${TAIL_S} ? end - ${TAIL_S} : 0 ))`,
-          // timeout: a live download must never hang the job until the sandbox dies.
-          `  timeout 25m ${YTDLP} --live-from-start --download-sections "*$start-$end" --max-filesize ${MAX_SOURCE_BYTES} -f ${shq(AUDIO)} -o src.mp4 ${shq(source.url)} \\`,
-          `    || { echo "DOWNLOAD_FAILED: couldn't download the last 1.5 hours"; exit 3; }`,
+          `  ${YTDLP} --live-from-start -O ${shq("%(is_live)s %(duration|0)d")} -O ${shq("%(title)s")} ${shq(source.url)} > meta.txt`,
+          `  read -r live dur < meta.txt; sed -n 2p meta.txt > title.txt`,
+          `  if [ "$live" = True ]; then`,
+          `    URL=${shq(source.url)}; ${LIVE_SEGS}`,
+          `    segs ${shq(LIVE_AUDIO)} -${TAIL_S} 0 tail.mp4 || { echo "DOWNLOAD_FAILED: couldn't download the last 1.5 hours"; exit 3; }`,
+          // The segments keep their time in the stream; remuxing restarts it at 0, which transcripts expect.
+          `    start=$(ffprobe -v error -show_entries format=start_time -of csv=p=0 tail.mp4)`,
+          `    ffmpeg -y -v error -i tail.mp4 -c copy src.mp4 && rm tail.mp4`,
+          `  else`,
+          `    [ "$dur" -gt 0 ] || { echo "DOWNLOAD_FAILED: couldn't tell how long this video is"; exit 3; }`,
+          `    start=$(( dur > ${TAIL_S} ? dur - ${TAIL_S} : 0 ))`,
+          `    timeout 25m ${YTDLP} --download-sections "*$start-$dur" --max-filesize ${MAX_SOURCE_BYTES} -f ${shq(AUDIO)} -o src.mp4 ${shq(source.url)} \\`,
+          `      || { echo "DOWNLOAD_FAILED: couldn't download the last 1.5 hours"; exit 3; }`,
+          `  fi`,
           `  echo "$start" > offset.txt`,
           `fi`,
           `[ -s src.mp4 ] || { echo "DOWNLOAD_FAILED: nothing was downloaded (too long, too big, private, or blocked)"; exit 3; }`,
@@ -163,13 +188,19 @@ export function renderScript(n: number, startS: number, endS: number, linkUrl?: 
           // "res" is the shorter side, so a vertical video keeps 720 across instead of 720 tall.
           // No --force-keyframes-at-cuts: measured on YouTube, the plain cut already starts within a frame of startS, and forcing re-encodes every clip twice.
           `get() { ${YTDLP} --live-from-start -f ${shq("bv*+ba/b")} -S res:720 --download-sections ${shq(`*${startS.toFixed(3)}-${endS.toFixed(3)}`)} --merge-output-format mp4 -o ${input} "$@"; }`,
-          `get --load-info-json src.mp4.info.json || get ${shq(linkUrl)}`,
+          // A live stream fails both (yt-dlp can't cut it), so fetch its segments. SS is where startS falls in the joined file.
+          `URL=${shq(linkUrl)}; ${LIVE_SEGS}`,
+          `get --load-info-json src.mp4.info.json || get "$URL" || {`,
+          `  segs ${shq(LIVE_VIDEO)} ${startS.toFixed(3)} ${endS.toFixed(3)} v.mp4 && segs ${shq(LIVE_AUDIO)} ${startS.toFixed(3)} ${endS.toFixed(3)} a.mp4 \\`,
+          `    && SS=$(ffprobe -v error -show_entries format=start_time -of csv=p=0 v.mp4 | awk '{ print ${startS.toFixed(3)} - $1 }') \\`,
+          `    && ffmpeg -y -v error -i v.mp4 -i a.mp4 -map 0:v -map 1:a -c copy ${input} && rm -f v.mp4 a.mp4`,
+          `}`,
           `[ -s ${input} ] || { echo "DOWNLOAD_FAILED: this moment could not be downloaded"; exit 3; }`,
         ]
       : []),
     [
       "ffmpeg -y -v error",
-      `-ss ${(linkUrl ? 0 : startS).toFixed(3)} -i ${input} -t ${dur.toFixed(3)}`,
+      `-ss ${linkUrl ? "${SS:-0}" : startS.toFixed(3)} -i ${input} -t ${dur.toFixed(3)}`,
       `-vf ${shq(clipFilter(`clip-${n}.ass`))}`,
       "-r 30 -c:v libx264 -preset veryfast -pix_fmt yuv420p",
       `-b:v ${kbps}k -maxrate ${kbps}k -bufsize ${kbps * 2}k`,
